@@ -72,6 +72,6 @@ Sau khi đã có file `config.json` từ bước trên, bạn tiến hành chạ
 
 Nếu gặp lỗi trong quá trình sử dụng, vui lòng tạo Issue trên Github hoặc liên hệ trực tiếp.
 
-Link Project: [https://github.com/username/uth-auto-register](https://github.com/username/uth-auto-register)
+Link Project: [https://github.com/username/uth-auto-register](https://github.com/DiepTuHuy/uth-auto-register)
 
 <p align="right">(<a href="#top">back to top</a>)</p>
