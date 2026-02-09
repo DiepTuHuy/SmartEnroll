@@ -39,7 +39,7 @@ Dưới đây là hướng dẫn chi tiết cách tải và thiết lập môi t
     python auto_config.py
     ```
     * Một cửa sổ Chrome sẽ hiện lên -> Bạn đăng nhập vào Portal.
-    * Bấm vào menu **Đăng ký học phần** trên web để tool bắt gói tin.
+    * Sau khi đăng nhập thành công, Chrome sẽ tự tắt.
     * Khi tool báo `✅ THÀNH CÔNG MỸ MÃN!`, file `config.json` sẽ tự động được tạo.
 
 ## Hướng dẫn sử dụng (Usage)
