@@ -24,13 +24,13 @@ Dưới đây là hướng dẫn chi tiết cách tải và thiết lập môi t
 
 1.  **Clone repository về máy** (hoặc tải file Zip và giải nén)
     ```sh
-    git clone https://github.com/DiepTuHuy/SmartEnroll.git
+    git clone [https://github.com/DiepTuHuy/SmartEnroll.git](https://github.com/DiepTuHuy/SmartEnroll.git)
     ```
 
 2.  **Cài đặt các thư viện cần thiết**
     Mở Terminal (hoặc CMD/PowerShell) tại thư mục vừa tải về và chạy lệnh sau:
     ```sh
-    pip install requests selenium undetected-chromedriver
+    pip install -r requirements.txt
     ```
 
 3.  **Cấu hình Token tự động**
