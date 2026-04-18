@@ -3,17 +3,18 @@ from selenium.webdriver.common.by import By
 import json
 import time
 import os
+import ssl
 
-# --- CẤU HÌNH ---
+# Fix SSL certificate verification issue
+ssl._create_default_https_context = ssl._create_unverified_context
+
 CONFIG_FILE = "config.json"
-CHROME_VERSION = 144  # Đảm bảo khớp với máy bạn (như hình trước bạn gửi)
+CHROME_VERSION = 147  # Updated to match current Chrome version
 
 def get_auto_config():
     print("🚀 Đang khởi động 'Điệp viên' Chrome...")
     
-    # 1. Cấu hình Chrome để cho phép ĐỌC LOG MẠNG (Quan trọng)
     options = uc.ChromeOptions()
-    # Dòng này bật chế độ ghi lại mọi gói tin mạng
     options.set_capability('goog:loggingPrefs', {'performance': 'ALL'}) 
     
     try:
