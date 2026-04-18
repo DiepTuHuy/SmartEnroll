@@ -9,7 +9,7 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 CONFIG_FILE = "config.json"
-CHROME_VERSION = 147  # Updated to match current Chrome version
+CHROME_VERSION = 147  # Cập nhật phiên bản Chrome
 
 def get_auto_config():
     print("🚀 Đang khởi động 'Điệp viên' Chrome...")
