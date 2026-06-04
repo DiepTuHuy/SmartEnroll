@@ -17,12 +17,15 @@ def run():
     print("🌍 Đang mở React Frontend (Vite)...")
     frontend_dir = os.path.join(os.getcwd(), "frontend")
     
+    import platform
+    is_windows = platform.system() == "Windows"
+    
     # Kiểm tra node_modules
     if not os.path.exists(os.path.join(frontend_dir, "node_modules")):
         print("📦 Chưa tìm thấy node_modules, đang cài đặt thư viện frontend...")
-        subprocess.run(["npm", "install"], cwd=frontend_dir)
+        subprocess.run(["npm", "install"], cwd=frontend_dir, shell=is_windows)
         
-    frontend_proc = subprocess.Popen(["npm", "run", "dev"], cwd=frontend_dir)
+    frontend_proc = subprocess.Popen(["npm", "run", "dev"], cwd=frontend_dir, shell=is_windows)
     
     try:
         # Giữ script chạy liên tục và kiểm tra trạng thái
