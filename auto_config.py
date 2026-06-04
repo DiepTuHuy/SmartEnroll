@@ -11,6 +11,56 @@ ssl._create_default_https_context = ssl._create_unverified_context
 CONFIG_FILE = "config.json"
 CHROME_VERSION = 147  # Cập nhật phiên bản Chrome
 
+def fetch_latest_id_dot(token, cookie):
+    import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    headers = {
+        "Authorization": token if "Bearer" in token else f"Bearer {token}",
+        "Cookie": cookie,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    endpoints = [
+        "https://portal.ut.edu.vn/api/v1/dkhp/getDot",
+        "https://portal.ut.edu.vn/api/v1/dkhp/getDotDangKy",
+        "https://portal.ut.edu.vn/api/v1/dkhp/getDotDangKyHocPhan",
+        "https://portal.ut.edu.vn/api/v1/dkhp/getDotDangKyChoSinhVien",
+        "https://portal.ut.edu.vn/api/v1/dkhp/getDotDangKyHocPhanChoSinhVien",
+        "https://portal.ut.edu.vn/api/v1/dkhp/getDotHoc",
+        "https://portal.ut.edu.vn/api/v1/dkhp/getDotHocPhan"
+    ]
+    
+    for url in endpoints:
+        try:
+            resp = requests.get(url, headers=headers, timeout=4, verify=False)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                dots = res_json.get("data") or res_json.get("body")
+                if dots and isinstance(dots, list):
+                    valid_dots = []
+                    for dot in dots:
+                        dot_id = dot.get('id') or dot.get('idDot') or dot.get('maDot') or dot.get('idDotDangKy')
+                        if dot_id is not None:
+                            is_active = dot.get('isDangKyHocPhan') or dot.get('dangKyHocPhan') or False
+                            valid_dots.append((str(dot_id), is_active, dot))
+                    
+                    if valid_dots:
+                        try:
+                            # Prioritize isDangKyHocPhan = True, then sort by ID descending
+                            valid_dots.sort(key=lambda x: (1 if x[1] else 0, int(x[0]) if x[0].isdigit() else 0), reverse=True)
+                        except:
+                            valid_dots.sort(key=lambda x: (1 if x[1] else 0, x[0]), reverse=True)
+                            
+                        latest_id, is_act, latest_dot = valid_dots[0]
+                        name_key = latest_dot.get('tenHocKy') or latest_dot.get('tenDot') or latest_dot.get('tenDotDangKy') or ''
+                        print(f"🎉 TÌM THẤY ĐỢT ĐĂNG KÝ: ID {latest_id} ({name_key}) - Active: {is_act}")
+                        return latest_id
+        except Exception:
+            pass
+    return None
+
 def get_auto_config():
     print("🚀 Đang khởi động 'Điệp viên' Chrome...")
     
@@ -27,21 +77,26 @@ def get_auto_config():
         driver.get("https://portal.ut.edu.vn/")
         
         print("👉 VUI LÒNG ĐĂNG NHẬP BẰNG TAY TRONG CỬA SỔ CHROME!")
-        print("⏳ Tool đang âm thầm quét gói tin để tìm Token...")
+        print("💡 GỢI Ý: Sau khi đăng nhập, hãy bấm vào menu 'Đăng ký học phần' để hệ thống tự động bắt được Đợt đăng ký!")
+        print("⏳ Tool đang âm thầm quét gói tin để tìm Token và ID Đợt...")
 
         found_token = None
         found_cookie = None
-        id_dot = "75" # Mặc định
+        found_id_dot = None
+        has_redirected = False
 
         # 3. Vòng lặp quét mạng (Network Sniffing)
-        # Tool sẽ đọc liên tục các gói tin Chrome gửi đi
         for i in range(120): # Chờ tối đa 2 phút
             
             # Lấy nhật ký mạng từ Chrome
             try:
+                if not driver.window_handles:
+                    print("❌ Trình duyệt đã bị đóng.")
+                    break
                 logs = driver.get_log('performance') 
-            except:
-                continue
+            except Exception:
+                print("❌ Trình duyệt đã đóng hoặc ngắt kết nối.")
+                break
 
             for entry in logs:
                 try:
@@ -49,76 +104,179 @@ def get_auto_config():
                     message = obj.get('message', {})
                     method = message.get('method')
                     
-                    # Chỉ quan tâm đến các Gói tin Gửi đi (Request)
                     if method == 'Network.requestWillBeSent':
                         params = message.get('params', {})
                         request = params.get('request', {})
+                        url = request.get('url', '')
                         headers = request.get('headers', {})
                         
                         # --- TÌM TOKEN (Authorization) ---
-                        # Token có thể viết hoa hoặc thường tùy gói tin
                         auth = headers.get('Authorization') or headers.get('authorization')
-                        
                         if auth and "Bearer" in auth:
-                            # Tìm thấy Token xịn!
-                            if len(auth) > 20: # Lọc token rác
+                            if len(auth) > 20:
                                 found_token = auth
-                                print(f"\n🔥 BẮT ĐƯỢC TOKEN RỒI: {auth[:20]}...")
+                                print(f"🔥 BẮT ĐƯỢC TOKEN RỒI: {auth[:25]}...")
                         
-                        # --- TÌM ID ĐỢT (Nếu lỡ bắt được gói tin đăng ký) ---
-                        # Nếu web gọi API dotDangKy, ta lấy luôn ID
-                        if "dotDangKy" in request.get('url', ''):
-                            # (Logic phức tạp hơn cần parse response, tạm thời bỏ qua)
-                            pass
+                        # --- TÌM ID ĐỢT ĐĂNG KÝ TỰ ĐỘNG (Từ query string) ---
+                        import urllib.parse
+                        parsed_url = urllib.parse.urlparse(url)
+                        query_params = urllib.parse.parse_qs(parsed_url.query)
+                        
+                        for key, values in query_params.items():
+                            if 'dot' in key.lower() and ('id' in key.lower() or 'dangky' in key.lower()):
+                                if values and values[0].isdigit():
+                                    found_id_dot = values[0]
+                                    print(f"🔥 BẮT ĐƯỢC ID ĐỢT ĐĂNG KÝ (GET): {found_id_dot}")
+                        
+                        # --- TÌM ID ĐỢT ĐĂNG KÝ TỰ ĐỘNG (Từ post data) ---
+                        post_data = request.get('postData', '')
+                        if post_data:
+                            try:
+                                post_json = json.loads(post_data)
+                                for k, v in post_json.items():
+                                    if 'dot' in k.lower() and 'id' in k.lower():
+                                        if str(v).isdigit():
+                                            found_id_dot = str(v)
+                                            print(f"🔥 BẮT ĐƯỢC ID ĐỢT ĐĂNG KÝ (POST JSON): {found_id_dot}")
+                            except:
+                                for item in post_data.split('&'):
+                                    if '=' in item:
+                                        k, v = item.split('=', 1)
+                                        if 'dot' in k.lower() and 'id' in k.lower():
+                                            if v.isdigit():
+                                                found_id_dot = v
+                                                print(f"🔥 BẮT ĐƯỢC ID ĐỢT ĐĂNG KÝ (POST FORM): {found_id_dot}")
 
                 except Exception:
                     pass
             
-            # Lấy Cookie (Dễ hơn, lấy trực tiếp từ trình duyệt)
-            cookies_list = driver.get_cookies()
-            current_cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
+            # --- CỐ GẮNG TRÍCH XUẤT TOKEN QUA JAVASCRIPT ---
+            if not found_token:
+                try:
+                    js_token_script = """
+                    function findToken() {
+                        const tokenKeys = ['token', 'accesstoken', 'access_token', 'jwt', 'auth', 'authorization', 'bearer', 'id_token', 'credential'];
+                        for (let i = 0; i < localStorage.length; i++) {
+                            let key = localStorage.key(i);
+                            let val = localStorage.getItem(key);
+                            if (val && typeof val === 'string') {
+                                if (val.startsWith('Bearer ') || val.startsWith('bearer ') || val.includes('eyJ')) return val;
+                                if (tokenKeys.some(k => key.toLowerCase().includes(k)) && val.length > 20) return val;
+                                try {
+                                    let obj = JSON.parse(val);
+                                    for (let k in obj) {
+                                        if (typeof obj[k] === 'string' && (obj[k].startsWith('Bearer ') || obj[k].includes('eyJ') || (tokenKeys.some(tk => k.toLowerCase().includes(tk)) && obj[k].length > 20))) return obj[k];
+                                    }
+                                } catch(e) {}
+                            }
+                        }
+                        for (let i = 0; i < sessionStorage.length; i++) {
+                            let key = sessionStorage.key(i);
+                            let val = sessionStorage.getItem(key);
+                            if (val && typeof val === 'string') {
+                                if (val.startsWith('Bearer ') || val.startsWith('bearer ') || val.includes('eyJ')) return val;
+                                if (tokenKeys.some(k => key.toLowerCase().includes(k)) && val.length > 20) return val;
+                                try {
+                                    let obj = JSON.parse(val);
+                                    for (let k in obj) {
+                                        if (typeof obj[k] === 'string' && (obj[k].startsWith('Bearer ') || obj[k].includes('eyJ') || (tokenKeys.some(tk => k.toLowerCase().includes(tk)) && obj[k].length > 20))) return obj[k];
+                                    }
+                                } catch(e) {}
+                            }
+                        }
+                        return null;
+                    }
+                    return findToken();
+                    """
+                    js_token = driver.execute_script(js_token_script)
+                    if js_token:
+                        clean_token = js_token if "Bearer" in js_token else f"Bearer {js_token}"
+                        if len(clean_token) > 20:
+                            found_token = clean_token
+                            print(f"🔥 BẮT ĐƯỢC TOKEN QUA JS: {found_token[:30]}...")
+                except Exception:
+                    pass
+
+            try:
+                current_url = driver.current_url
+                cookies_list = driver.get_cookies()
+                current_cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
+            except Exception:
+                current_url = ""
+                current_cookie_str = ""
+
+            # --- TỰ ĐỘNG CHUYỂN HƯỚNG SANG TRANG ĐĂNG KÝ KHI ĐÃ ĐĂNG NHẬP ---
+            if "/dashboard" in current_url and not has_redirected:
+                print("🔄 Phát hiện đã đăng nhập thành công! Tự động chuyển hướng sang trang đăng ký...")
+                has_redirected = True
+                try:
+                    driver.get("https://portal.ut.edu.vn/coursesregistration")
+                except Exception:
+                    pass
             
-            # Điều kiện thoát: Tìm thấy Token Bearer
-            if found_token:
+            # --- TỰ ĐỘNG TRUY VẤN LẤY ID ĐỢT KHI ĐÃ CÓ TOKEN VÀ COOKIE ---
+            if found_token and not found_id_dot and current_cookie_str:
+                print("📡 Đang truy vấn API trường để tự động lấy đợt đăng ký mới nhất...")
+                found_id_dot = fetch_latest_id_dot(found_token, current_cookie_str)
+                if not found_id_dot:
+                    print("⚠️ Chưa truy vấn được đợt đăng ký qua API. Chờ trình duyệt tự tải...")
+            
+            # Điều kiện thoát: Tìm thấy cả Token Bearer và idDot
+            if found_token and found_id_dot:
                 found_cookie = current_cookie_str
                 break
             
-            # Mẹo: Nếu người dùng đã đăng nhập xong (có cookie xịn) mà chưa thấy Token
-            # Ta thử Refresh trang để Web buộc phải gửi lại Token
-            if "ASP.NET" in current_cookie_str and i == 20:
+            # Mẹo: Refresh trang nếu đã đăng nhập nhưng chưa bắt được token
+            if "ASP.NET" in current_cookie_str and not found_token and i == 20:
                 print("🔄 Đang thử tải lại trang để bắt Token...")
-                driver.refresh()
+                try:
+                    driver.refresh()
+                except Exception:
+                    pass
 
             if i % 5 == 0:
-                print(f"🕵️ Đang rà soát... ({i}s)")
+                print(f"🕵️ Đang rà soát... (Giây thứ {i})")
             
             time.sleep(1)
 
         # 4. Kết thúc & Lưu file
-        driver.quit()
+        try:
+            driver.quit()
+        except:
+            pass
         
         if found_token:
             print("\n✅ THÀNH CÔNG MỸ MÃN!")
             
-            # Lưu user agent
             user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             
+            # Đọc config cũ nếu có
+            old_config = {}
+            if os.path.exists(CONFIG_FILE):
+                try:
+                    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                        old_config = json.load(f)
+                except:
+                    pass
+            
+            # Ưu tiên id_dot mới bắt được, nếu không có thì giữ lại cái cũ, cuối cùng mới mặc định là "75"
+            final_id_dot = found_id_dot or old_config.get("id_dot") or "75"
+            
             config_data = {
-                "api_url": "https://portal.ut.edu.vn/coursesregistration", # URL thật
-                "token": found_token.replace("Bearer ", "").strip(), # Chỉ lấy phần mã
-                "cookie": found_cookie,
-                "id_dot": id_dot,
+                "api_url": "https://portal.ut.edu.vn/coursesregistration",
+                "token": found_token.replace("Bearer ", "").strip(),
+                "cookie": current_cookie_str if current_cookie_str else old_config.get("cookie", ""),
+                "id_dot": final_id_dot,
                 "user_agent": user_agent
             }
             
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=4)
                 
-            print(f"📂 Đã lưu vào file {CONFIG_FILE}. Bạn có thể chạy Tool Spam ngay!")
+            print(f"📂 Đã lưu cấu hình vào file {CONFIG_FILE}.")
             return config_data
         else:
-            print("\n❌ Hết giờ! Không bắt được gói tin nào chứa Token.")
-            print("💡 Gợi ý: Sau khi đăng nhập, hãy bấm thử vào menu 'Đăng ký học phần' để web gửi gói tin đi.")
+            print("\n❌ Thất bại! Không tìm thấy Token.")
             return None
 
     except Exception as e:
