@@ -9,7 +9,76 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 CONFIG_FILE = "config.json"
-CHROME_VERSION = 147  # Cập nhật phiên bản Chrome
+
+def get_chrome_major_version():
+    import platform
+    import os
+    import re
+    import subprocess
+    
+    system = platform.system()
+    if system == "Darwin": # macOS
+        paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome.app/Contents/Info.plist"
+        ]
+        for path in paths:
+            if os.path.exists(path):
+                if path.endswith("Info.plist"):
+                    try:
+                        import plistlib
+                        with open(path, "rb") as f:
+                            plist = plistlib.load(f)
+                            version = plist.get("CFBundleShortVersionString")
+                            if version:
+                                return int(version.split(".")[0])
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        out = subprocess.check_output([path, "--version"]).decode("utf-8")
+                        match = re.search(r"Google Chrome (\d+)", out)
+                        if match:
+                            return int(match.group(1))
+                    except Exception:
+                        pass
+    elif system == "Windows":
+        try:
+            import winreg
+            keys = [
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome")
+            ]
+            for hkey, path in keys:
+                try:
+                    with winreg.OpenKey(hkey, path) as key:
+                        val, _ = winreg.QueryValueEx(key, "") if "App Paths" in path else winreg.QueryValueEx(key, "DisplayVersion")
+                        if val:
+                            if os.path.exists(val):
+                                dir_path = os.path.dirname(val)
+                                for item in os.listdir(dir_path):
+                                    if item[0].isdigit() and os.path.isdir(os.path.join(dir_path, item)):
+                                        return int(item.split(".")[0])
+                            else:
+                                return int(val.split(".")[0])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+            
+        win_paths = [
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Google\\Chrome\\Application"),
+            os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "Google\\Chrome\\Application"),
+            os.path.join(os.environ.get("LocalAppData", ""), "Google\\Chrome\\Application")
+        ]
+        for p in win_paths:
+            if os.path.exists(p):
+                for item in os.listdir(p):
+                    if item[0].isdigit() and os.path.isdir(os.path.join(p, item)):
+                        return int(item.split(".")[0])
+    return None
 
 def fetch_latest_id_dot(token, cookie):
     import requests
@@ -68,8 +137,14 @@ def get_auto_config():
     options.set_capability('goog:loggingPrefs', {'performance': 'ALL'}) 
     
     try:
-        # Khởi tạo Chrome
-        driver = uc.Chrome(options=options, version_main=CHROME_VERSION, use_subprocess=True)
+        # Tự động phát hiện phiên bản Chrome
+        chrome_version = get_chrome_major_version()
+        if chrome_version:
+            print(f"🖥️ Phát hiện phiên bản Chrome cài đặt: {chrome_version}")
+            driver = uc.Chrome(options=options, version_main=chrome_version, use_subprocess=True)
+        else:
+            print("⚠️ Không thể tự động phát hiện phiên bản Chrome, sử dụng cấu hình mặc định của undetected-chromedriver...")
+            driver = uc.Chrome(options=options, use_subprocess=True)
         driver.set_window_size(1000, 800)
         
         # 2. Vào trang Dashboard

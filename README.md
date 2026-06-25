@@ -95,8 +95,8 @@ Sau khi chạy lệnh, hệ thống sẽ tự động:
 
 ## 🔍 Khắc phục lỗi (Troubleshooting)
 
-- **Lỗi Chrome Version Mismatch:**
-  - Nếu Selenium báo lỗi phiên bản Chrome không khớp, hãy mở file [auto_config.py](file:///Users/dieptuhuy/Documents/SmartEnroll/auto_config.py) và sửa biến `CHROME_VERSION` ở dòng 12 khớp với số phiên bản chính của Chrome trên máy bạn (ví dụ: `147` thành `125`, `126`,... tùy thuộc trình duyệt hiện tại).
+- **Tự động nhận diện phiên bản Chrome:**
+  - Hệ thống hiện nay đã tự động tìm kiếm và phát hiện phiên bản Chrome đang được cài đặt trên hệ điều hành của bạn (Windows & macOS) để cấu hình cho Selenium. Lỗi lệch phiên bản (Chrome Version Mismatch) đã được tự động giải quyết triệt để.
 - **Lỗi Cổng 5001 bị chiếm dụng:**
   - Trên hệ điều hành macOS, tính năng *AirPlay Receiver* có thể chiếm dụng cổng `5000` hoặc `5001`. Script `start.py` đã tự động tìm giải phóng, tuy nhiên nếu vẫn bị đụng độ cổng, hãy tắt tính năng *AirPlay Receiver* trong mục Cài đặt hệ thống (System Settings) của macOS.
 - **Lỗi Token hết hạn (HTTP 401):**
