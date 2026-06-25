@@ -8,7 +8,8 @@ import ssl
 # Fix SSL certificate verification issue
 ssl._create_default_https_context = ssl._create_unverified_context
 
-CONFIG_FILE = "config.json"
+# Lưu config vào thư mục home của người dùng để tránh lỗi phân quyền (Read-only AppTranslocation) khi đóng gói trên macOS/Windows
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".smartenroll_config.json")
 
 def get_chrome_major_version():
     import platform

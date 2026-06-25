@@ -31,7 +31,8 @@ def serve_index():
         return app.send_static_file("index.html")
     return "SmartEnroll API Server is running. Static frontend not found."
 
-CONFIG_FILE = "config.json"
+# Lưu config vào thư mục home của người dùng để tránh lỗi phân quyền (Read-only AppTranslocation) khi đóng gói trên macOS/Windows
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".smartenroll_config.json")
 
 class AppState:
     def __init__(self):
@@ -51,6 +52,15 @@ class AppState:
         self.load_config_data()
 
     def load_config_data(self):
+        # Tự động di chuyển config.json cũ sang thư mục home nếu chưa di chuyển
+        if not os.path.exists(CONFIG_FILE) and os.path.exists("config.json"):
+            try:
+                import shutil
+                shutil.copy("config.json", CONFIG_FILE)
+                self.log(f"Đã tự động di chuyển config.json sang {CONFIG_FILE}")
+            except Exception as e:
+                self.log(f"Lỗi khi di chuyển config.json: {e}")
+
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:

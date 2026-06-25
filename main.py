@@ -15,9 +15,12 @@ CA_HOC = {
     "Ca 5 (Tiết 13-15)": [13, 14, 15]
 }
 
+import os
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".smartenroll_config.json")
+
 def load_config():
     try:
-        with open("config.json", "r", encoding="utf-8") as f:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
         return None
