@@ -93,6 +93,40 @@ Sau khi chạy lệnh, hệ thống sẽ tự động:
 
 ---
 
+## 📦 Hướng dẫn Đóng gói Phần mềm (Standalone Packaging)
+
+Để đóng gói toàn bộ hệ thống (gồm backend Flask, giao diện React tĩnh và Selenium driver) thành **1 file chạy duy nhất (.exe trên Windows hoặc nhị phân trên macOS)** có dung lượng cực nhẹ (~15MB) không cần cài đặt Node.js/Python ở máy người dùng cuối, hãy làm như sau:
+
+### Bước 1: Biên dịch giao diện React tĩnh
+Mở Terminal/CMD tại thư mục gốc và chạy:
+```bash
+cd frontend
+npm run build
+cd ..
+```
+
+### Bước 2: Cài đặt PyInstaller
+```bash
+pip install pyinstaller
+```
+
+### Bước 3: Chạy lệnh đóng gói
+Tùy thuộc vào hệ điều hành bạn đang sử dụng:
+
+- **Trên Windows:**
+  ```cmd
+  pyinstaller --onefile --noconsole --add-data "frontend/dist;frontend/dist" --add-data "auto_config.py;." --name SmartEnroll server.py
+  ```
+
+- **Trên macOS:**
+  ```bash
+  pyinstaller --onefile --noconsole --add-data "frontend/dist:frontend/dist" --add-data "auto_config.py:." --name SmartEnroll server.py
+  ```
+
+*Sau khi đóng gói hoàn tất, file thực thi sẽ nằm trong thư mục `dist/` ở thư mục gốc của dự án. Click đúp vào file để khởi chạy và tự động mở trình duyệt.*
+
+---
+
 ## 🔍 Khắc phục lỗi (Troubleshooting)
 
 - **Tự động nhận diện phiên bản Chrome:**
