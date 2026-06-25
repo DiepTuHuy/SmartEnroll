@@ -17,11 +17,9 @@ jobs:
         os: [windows-latest, macos-latest]
         include:
           - os: windows-latest
-            artifact_name: SmartEnroll.exe
-            asset_name: SmartEnroll-Windows.exe
+            path: dist/SmartEnroll-Windows.exe
           - os: macos-latest
-            artifact_name: SmartEnroll
-            asset_name: SmartEnroll-macOS
+            path: dist/SmartEnroll-macOS.zip
 
     steps:
       - name: Checkout code
@@ -55,22 +53,21 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
           pyinstaller --onefile --noconsole --add-data "frontend/dist;frontend/dist" --add-data "auto_config.py;." --name SmartEnroll server.py
+          mv dist/SmartEnroll.exe dist/SmartEnroll-Windows.exe
 
       - name: Build with PyInstaller (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          pyinstaller --onefile --noconsole --add-data "frontend/dist:frontend/dist" --add-data "auto_config.py:." --name SmartEnroll server.py
-
-      - name: Rename executable
-        shell: bash
-        run: |
-          mv dist/${{ matrix.artifact_name }} dist/${{ matrix.asset_name }}
+          pyinstaller --noconsole --add-data "frontend/dist:frontend/dist" --add-data "auto_config.py:." --name SmartEnroll server.py
+          cd dist
+          zip -y -r SmartEnroll-macOS.zip SmartEnroll.app
+          cd ..
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-build
-          path: dist/${{ matrix.asset_name }}
+          path: ${{ matrix.path }}
 
   release:
     name: Create GitHub Release
