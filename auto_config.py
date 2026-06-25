@@ -164,14 +164,22 @@ def get_auto_config():
         for i in range(120): # Chờ tối đa 2 phút
             
             # Lấy nhật ký mạng từ Chrome
+            logs = []
             try:
                 if not driver.window_handles:
                     print("❌ Trình duyệt đã bị đóng.")
                     break
                 logs = driver.get_log('performance') 
-            except Exception:
-                print("❌ Trình duyệt đã đóng hoặc ngắt kết nối.")
-                break
+            except Exception as e:
+                print(f"⚠️ Cảnh báo kết nối DevTools (tạm thời): {e}")
+                try:
+                    if not driver.window_handles:
+                        print("❌ Trình duyệt đã bị đóng.")
+                        break
+                except:
+                    break
+                time.sleep(1)
+                continue
 
             for entry in logs:
                 try:
