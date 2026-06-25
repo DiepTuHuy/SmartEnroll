@@ -17,8 +17,19 @@ CA_HOC = {
     "Ca 5 (Tiết 13-15)": [13, 14, 15]
 }
 
-app = Flask(__name__)
+# Cấu hình thư mục chứa static files của React frontend
+dist_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
+if not os.path.exists(dist_folder):
+    dist_folder = os.path.join(sys._MEIPASS, "frontend", "dist") if hasattr(sys, "_MEIPASS") else "dist"
+
+app = Flask(__name__, static_folder=dist_folder, static_url_path="/")
 CORS(app)  # Enable CORS for frontend
+
+@app.route("/")
+def serve_index():
+    if os.path.exists(os.path.join(app.static_folder, "index.html")):
+        return app.send_static_file("index.html")
+    return "SmartEnroll API Server is running. Static frontend not found."
 
 CONFIG_FILE = "config.json"
 
@@ -351,4 +362,15 @@ def get_spam_status():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5001))
     state.log(f"🔥 API Server đang chạy tại http://localhost:{port}")
+    
+    # Tự động mở trình duyệt sau khi Flask khởi động
+    import webbrowser
+    def open_browser():
+        time.sleep(1.5)
+        try:
+            webbrowser.open(f"http://localhost:{port}")
+        except Exception:
+            pass
+    threading.Thread(target=open_browser, daemon=True).start()
+    
     app.run(host='0.0.0.0', port=port, debug=False)
