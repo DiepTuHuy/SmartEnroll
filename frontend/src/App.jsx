@@ -10,6 +10,7 @@ export default function App() {
   // App States
   const [config, setConfig] = useState(null);
   const [configExists, setConfigExists] = useState(false);
+  const [isTokenExpired, setIsTokenExpired] = useState(false);
   const [showManual, setShowManual] = useState(false);
   
   // Manual Config inputs
@@ -53,6 +54,7 @@ export default function App() {
       if (data.exists) {
         setConfig(data.config);
         setConfigExists(true);
+        setIsTokenExpired(false);
         setManToken(data.config.token || '');
         setManCookie(data.config.cookie || '');
         setManIdDot(data.config.id_dot || '');
@@ -60,6 +62,7 @@ export default function App() {
       } else {
         setConfig(null);
         setConfigExists(false);
+        setIsTokenExpired(false);
       }
     } catch (err) {
       console.error("Lỗi lấy cấu hình:", err);
@@ -79,8 +82,14 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setCourses(data.data || []);
+        setIsTokenExpired(false);
       } else {
-        alert("Lỗi tải môn học: " + data.message);
+        if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
+          setIsTokenExpired(true);
+          setCourses([]);
+        } else {
+          alert("Lỗi tải môn học: " + data.message);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -93,7 +102,7 @@ export default function App() {
     if (configExists) {
       fetchCourses();
     }
-  }, [configExists, config?.id_dot]);
+  }, [configExists, config]);
 
   // Poll Auto config status
   useEffect(() => {
@@ -309,9 +318,9 @@ export default function App() {
         </div>
         
         <div className="header-badges">
-          <div className={`badge ${configExists ? 'badge-ready' : 'badge-pending'}`}>
+          <div className={`badge ${isTokenExpired ? 'badge-expired' : configExists ? 'badge-ready' : 'badge-pending'}`}>
             <span className="badge-dot pulse-indicator"></span>
-            {configExists ? 'Cấu hình: ĐÃ SẴN SÀNG' : 'Cấu hình: CHƯA CÓ'}
+            {isTokenExpired ? 'Cấu hình: HẾT HẠN' : configExists ? 'Cấu hình: ĐÃ SẴN SÀNG' : 'Cấu hình: CHƯA CÓ'}
           </div>
           
           {isSpamming && (
@@ -561,6 +570,10 @@ export default function App() {
                     <div className="dropdown-list">
                       {coursesLoading ? (
                         <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Đang tải danh sách môn...</div>
+                      ) : isTokenExpired ? (
+                        <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--danger-hover)', fontWeight: '500' }}>
+                          ⚠️ Phiên đăng nhập hết hạn. Hãy bấm "Tự động lấy Token & id đợt"!
+                        </div>
                       ) : filteredCourses.length > 0 ? (
                         filteredCourses.map((c, index) => {
                           const lbl = `[${c.maHocPhan}] ${c.tenHocPhan || c.tenMonHoc || ''}`;

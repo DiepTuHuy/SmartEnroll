@@ -149,6 +149,12 @@ body {
 }
 
 .badge-pending {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.badge-expired {
   background: rgba(244, 63, 94, 0.1);
   color: #fb7185;
   border-color: rgba(244, 63, 94, 0.25);
@@ -167,7 +173,8 @@ body {
 }
 
 .badge-ready .badge-dot { background-color: var(--success); box-shadow: 0 0 8px var(--success); }
-.badge-pending .badge-dot { background-color: var(--danger); }
+.badge-pending .badge-dot { background-color: var(--warning); box-shadow: 0 0 8px var(--warning); }
+.badge-expired .badge-dot { background-color: var(--danger); box-shadow: 0 0 8px var(--danger); }
 .badge-active .badge-dot { background-color: var(--secondary); box-shadow: 0 0 8px var(--secondary); }
 
 /* Grid Layout */
