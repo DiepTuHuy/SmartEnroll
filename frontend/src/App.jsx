@@ -146,6 +146,12 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setDots(data.data || []);
+      } else {
+        if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
+          setIsTokenExpired(true);
+          setTimeLeft(0);
+          setDots([]);
+        }
       }
     } catch (err) {
       console.error("Lỗi lấy danh sách đợt:", err);
@@ -231,7 +237,13 @@ export default function App() {
         resetSessionTimer();
         fetchRegisteredClasses(); // Reload list
       } else {
-        alert("Lỗi hủy đăng ký: " + data.message);
+        if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
+          setIsTokenExpired(true);
+          setTimeLeft(0);
+          alert("Lỗi hủy đăng ký: Phiên đăng nhập (Token) của bạn đã hết hạn. Vui lòng bấm lấy lại Token!");
+        } else {
+          alert("Lỗi hủy đăng ký: " + data.message);
+        }
       }
     } catch (err) {
       alert("Lỗi mạng khi hủy đăng ký: " + err.message);
@@ -374,7 +386,13 @@ export default function App() {
           alert("Không tìm thấy lớp nào phù hợp bộ lọc.");
         }
       } else {
-        alert("Lỗi quét lớp: " + data.message);
+        if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
+          setIsTokenExpired(true);
+          setTimeLeft(0);
+          alert("Lỗi quét lớp: Phiên đăng nhập (Token) của bạn đã hết hạn hoặc bị hủy trên máy chủ trường. Vui lòng bấm lấy lại Token!");
+        } else {
+          alert("Lỗi quét lớp: " + data.message);
+        }
       }
     } catch (err) {
       alert("Lỗi mạng: " + err.message);
