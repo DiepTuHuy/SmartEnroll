@@ -22,6 +22,10 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(900); // 15 minutes default
   const [timerActive, setTimerActive] = useState(false);
 
+  // Registered classes states
+  const [registeredClasses, setRegisteredClasses] = useState([]);
+  const [registeredLoading, setRegisteredLoading] = useState(false);
+
   // Manual Config inputs
   const [manToken, setManToken] = useState('');
   const [manCookie, setManCookie] = useState('');
@@ -183,9 +187,61 @@ export default function App() {
     }
   };
 
+  // Fetch registered courses from UTH
+  const fetchRegisteredClasses = async () => {
+    if (!configExists) return;
+    const dot = selectedDot || config?.id_dot;
+    if (!dot) return;
+
+    setRegisteredLoading(true);
+    try {
+      const res = await fetch(`/api/registered?idDot=${dot}`);
+      const data = await res.json();
+      if (data.success) {
+        setRegisteredClasses(data.data || []);
+      } else {
+        if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
+          setIsTokenExpired(true);
+          setRegisteredClasses([]);
+        } else {
+          console.error("Lỗi tải lớp đã đăng ký:", data.message);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setRegisteredLoading(false);
+    }
+  };
+
+  // Deregister a class section
+  const handleDeregisterClass = async (idDangKy, className) => {
+    const confirmDeregister = window.confirm(`Bạn có chắc chắn muốn hủy đăng ký lớp "${className}" không?`);
+    if (!confirmDeregister) return;
+
+    try {
+      const res = await fetch('/api/deregister', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idDangKy: idDangKy })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Hủy đăng ký thành công!");
+        resetSessionTimer();
+        fetchRegisteredClasses(); // Reload list
+      } else {
+        alert("Lỗi hủy đăng ký: " + data.message);
+      }
+    } catch (err) {
+      alert("Lỗi mạng khi hủy đăng ký: " + err.message);
+    }
+  };
+
   useEffect(() => {
     if (configExists) {
       fetchCourses();
+      fetchRegisteredClasses();
     }
   }, [configExists, config, regType, selectedDot]);
 
@@ -784,6 +840,90 @@ export default function App() {
             </div>
           </motion.div>
 
+          {/* REGISTERED CLASSES CARD */}
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+            className="card"
+            style={{ marginTop: '16px' }}
+          >
+            <div className="card-header" style={{ marginBottom: '14px' }}>
+              <h2 className="card-title purple">
+                <CheckSquare className="w-5 h-5" />
+                3. Học phần đã đăng ký thành công
+              </h2>
+              <button 
+                onClick={fetchRegisteredClasses}
+                disabled={registeredLoading || !configExists}
+                className="eye-button"
+                title="Tải lại danh sách lớp đã đăng ký"
+                style={{ padding: '6px' }}
+              >
+                <RefreshCw className={`w-4 h-4 ${registeredLoading ? 'spin-loading' : ''}`} />
+              </button>
+            </div>
+
+            <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+              {registeredLoading ? (
+                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Đang tải danh sách học phần đã đăng ký...
+                </div>
+              ) : registeredClasses.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {registeredClasses.map((rc, idx) => {
+                    const rcId = rc.id || rc.idDangKy;
+                    const rcName = rc.tenLopHocPhan || rc.tenHocPhan || rc.tenMonHoc || 'Học phần';
+                    const rcCode = rc.maLopHocPhan || rc.maHocPhan || '';
+                    const rcCredits = rc.soTinChi || 0;
+                    return (
+                      <div 
+                        key={idx} 
+                        style={{ 
+                          background: 'rgba(255, 255, 255, 0.02)', 
+                          border: '1px solid rgba(255, 255, 255, 0.05)', 
+                          borderRadius: '8px', 
+                          padding: '10px 14px', 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          gap: '10px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {rcName}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Mã lớp: {rcCode} ({rcCredits} TC)
+                          </span>
+                        </div>
+                        <button 
+                          onClick={() => handleDeregisterClass(rcId, rcName)}
+                          className="btn btn-outline"
+                          style={{ 
+                            width: 'auto', 
+                            padding: '6px 12px', 
+                            fontSize: '0.75rem', 
+                            borderColor: 'rgba(244, 63, 94, 0.4)', 
+                            color: '#fb7185',
+                            background: 'rgba(244, 63, 94, 0.05)'
+                          }}
+                        >
+                          Hủy đăng ký
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dark)', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                  Chưa có môn nào đã đăng ký trong đợt này.
+                </div>
+              )}
+            </div>
+          </motion.div>
+
         </div>
 
         {/* RIGHT COLUMN: SCAN RESULTS & SPAM CONSOLE */}
@@ -930,7 +1070,7 @@ export default function App() {
             <div className="card-header" style={{ marginBottom: '16px' }}>
               <h2 className="card-title rose">
                 <Terminal className="w-5 h-5" />
-                3. Trình điều khiển Spam và Console log
+                4. Trình điều khiển Spam và Console log
               </h2>
               
               {/* Stats tags */}

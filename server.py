@@ -322,6 +322,51 @@ def get_dots():
     except Exception as e:
         return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
 
+@app.route('/api/registered', methods=['GET'])
+def get_registered_classes():
+    if not state.config:
+        return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
+        
+    id_dot = request.args.get('idDot', state.config.get('id_dot'))
+    url = "https://portal.ut.edu.vn/api/v1/dkhp/getLHPDaDangKy"
+    params = {"idDot": id_dot}
+    
+    try:
+        resp = state.session.get(url, params=params, timeout=10)
+        if resp.status_code == 200:
+            registered = resp.json().get('data') or resp.json().get('body') or []
+            return jsonify({"success": True, "data": registered})
+        elif resp.status_code == 401:
+            return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
+        else:
+            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
+
+@app.route('/api/deregister', methods=['POST'])
+def deregister_class():
+    if not state.config:
+        return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
+        
+    id_dang_ky = request.json.get('idDangKy')
+    if not id_dang_ky:
+        return jsonify({"success": False, "message": "Thiếu mã đăng ký (idDangKy)!"}), 400
+        
+    url = "https://portal.ut.edu.vn/api/v1/dkhp/huyDangKy"
+    params = {"idDangKy": str(id_dang_ky)}
+    
+    try:
+        resp = state.session.delete(url, params=params, timeout=10)
+        if resp.status_code == 200:
+            return jsonify(resp.json())
+        elif resp.status_code == 401:
+            return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
+        else:
+            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
+
+
 @app.route('/api/classes', methods=['GET'])
 def get_classes():
     if not state.config:
