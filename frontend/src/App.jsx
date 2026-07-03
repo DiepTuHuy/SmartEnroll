@@ -719,6 +719,7 @@ export default function App() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2 }}
             className="card"
+            style={{ zIndex: dropdownOpen ? 10 : 1, position: 'relative' }}
           >
             <h2 className="card-title cyan" style={{ marginBottom: '20px' }}>
               <Search className="w-5 h-5" />
