@@ -13,6 +13,11 @@ export default function App() {
   const [isTokenExpired, setIsTokenExpired] = useState(false);
   const [showManual, setShowManual] = useState(false);
   
+  // Semester periods and registration types
+  const [dots, setDots] = useState([]);
+  const [selectedDot, setSelectedDot] = useState('');
+  const [regType, setRegType] = useState('new'); // new, repeat, improve
+
   // Manual Config inputs
   const [manToken, setManToken] = useState('');
   const [manCookie, setManCookie] = useState('');
@@ -59,6 +64,9 @@ export default function App() {
         setManCookie(data.config.cookie || '');
         setManIdDot(data.config.id_dot || '');
         setManUserAgent(data.config.user_agent || '');
+        if (data.config.id_dot) {
+          setSelectedDot(data.config.id_dot);
+        }
       } else {
         setConfig(null);
         setConfigExists(false);
@@ -73,12 +81,35 @@ export default function App() {
     fetchConfig();
   }, []);
 
+  // Fetch available registration periods
+  const fetchDots = async () => {
+    if (!configExists) return;
+    try {
+      const res = await fetch('/api/dots');
+      const data = await res.json();
+      if (data.success) {
+        setDots(data.data || []);
+      }
+    } catch (err) {
+      console.error("Lỗi lấy danh sách đợt:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (configExists) {
+      fetchDots();
+    }
+  }, [configExists]);
+
   // Fetch courses list once config is loaded
   const fetchCourses = async () => {
     if (!configExists) return;
+    const dot = selectedDot || config?.id_dot;
+    if (!dot) return;
+
     setCoursesLoading(true);
     try {
-      const res = await fetch('/api/courses');
+      const res = await fetch(`/api/courses?type=${regType}&idDot=${dot}`);
       const data = await res.json();
       if (data.success) {
         setCourses(data.data || []);
@@ -102,7 +133,7 @@ export default function App() {
     if (configExists) {
       fetchCourses();
     }
-  }, [configExists, config]);
+  }, [configExists, config, regType, selectedDot]);
 
   // Poll Auto config status
   useEffect(() => {
@@ -222,7 +253,8 @@ export default function App() {
     setIsScanning(true);
     setClasses([]);
     try {
-      const res = await fetch(`/api/classes?maHocPhan=${selectedCourse}&thu=${encodeURIComponent(filterThu)}&ca=${encodeURIComponent(filterCa)}`);
+      const dot = selectedDot || config?.id_dot;
+      const res = await fetch(`/api/classes?maHocPhan=${selectedCourse}&idDot=${dot}&thu=${encodeURIComponent(filterThu)}&ca=${encodeURIComponent(filterCa)}`);
       const data = await res.json();
       if (data.success) {
         setClasses(data.data || []);
@@ -370,10 +402,6 @@ export default function App() {
                   {configExists ? (
                     <div className="config-display">
                       <div className="config-item">
-                        <span className="config-key">ID Đợt học phần (id_dot):</span>
-                        <span className="config-value glow">{config.id_dot}</span>
-                      </div>
-                      <div className="config-item">
                         <span className="config-key">Token đăng nhập:</span>
                         <div className="config-value">
                           <span>{showToken ? config.token : '••••••••••••••••••••••••'}</span>
@@ -392,6 +420,40 @@ export default function App() {
                             {showCookie ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
+                      </div>
+                      
+                      <div className="config-item" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px' }}>
+                        <span className="config-key">Chọn Đợt học:</span>
+                        <select 
+                          value={selectedDot} 
+                          onChange={(e) => setSelectedDot(e.target.value)}
+                          className="select-input"
+                          style={{ maxWidth: '220px', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                        >
+                          {dots.length > 0 ? (
+                            dots.map(d => (
+                              <option key={d.id || d.idDot} value={d.id || d.idDot}>
+                                {d.tenHocKy || d.tenDot || d.id || d.idDot}
+                              </option>
+                            ))
+                          ) : (
+                            <option value={config.id_dot}>{config.id_dot}</option>
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="config-item">
+                        <span className="config-key">Loại Đăng ký:</span>
+                        <select 
+                          value={regType} 
+                          onChange={(e) => setRegType(e.target.value)}
+                          className="select-input"
+                          style={{ maxWidth: '220px', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                        >
+                          <option value="new">Học mới (Đăng ký học phần)</option>
+                          <option value="repeat">Học lại / Môn điều kiện</option>
+                          <option value="improve">Học cải thiện</option>
+                        </select>
                       </div>
                     </div>
                   ) : (

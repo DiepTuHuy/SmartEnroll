@@ -280,14 +280,41 @@ def get_courses():
     if not state.config:
         return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
     
-    url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanHocMoi"
-    params = {"idDot": state.config.get('id_dot')}
+    reg_type = request.args.get('type', 'new')  # new, repeat, improve
+    id_dot = request.args.get('idDot', state.config.get('id_dot'))
+    
+    if reg_type == 'repeat':
+        url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanHocLai"
+    elif reg_type == 'improve':
+        url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanCaiThien"
+    else:
+        url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanHocMoi"
+        
+    params = {"idDot": id_dot}
     
     try:
         resp = state.session.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             subjects = resp.json().get('data') or resp.json().get('body') or []
             return jsonify({"success": True, "data": subjects})
+        elif resp.status_code == 401:
+            return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
+        else:
+            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
+
+@app.route('/api/dots', methods=['GET'])
+def get_dots():
+    if not state.config:
+        return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
+        
+    url = "https://portal.ut.edu.vn/api/v1/dkhp/getDot"
+    try:
+        resp = state.session.get(url, timeout=10)
+        if resp.status_code == 200:
+            dots = resp.json().get('data') or resp.json().get('body') or []
+            return jsonify({"success": True, "data": dots})
         elif resp.status_code == 401:
             return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
         else:
@@ -303,13 +330,14 @@ def get_classes():
     ma_hp = request.args.get('maHocPhan')
     target_thu = request.args.get('thu', 'Tất cả')
     target_ca = request.args.get('ca', 'Tất cả')
+    id_dot = request.args.get('idDot', state.config.get('id_dot'))
     
     if not ma_hp:
         return jsonify({"success": False, "message": "Thiếu mã học phần!"}), 400
 
     url_list = "https://portal.ut.edu.vn/api/v1/dkhp/getLopHocPhanChoDangKy"
     params = {
-        "idDot": state.config.get('id_dot'),
+        "idDot": id_dot,
         "maHocPhan": ma_hp,
         "isLocTrung": "false",
         "isLocTrungWithoutElearning": "false"
