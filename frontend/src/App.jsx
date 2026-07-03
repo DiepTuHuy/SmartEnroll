@@ -18,6 +18,10 @@ export default function App() {
   const [selectedDot, setSelectedDot] = useState('');
   const [regType, setRegType] = useState('new'); // new, repeat, improve
 
+  // Token countdown timer states
+  const [timeLeft, setTimeLeft] = useState(900); // 15 minutes default
+  const [timerActive, setTimerActive] = useState(false);
+
   // Manual Config inputs
   const [manToken, setManToken] = useState('');
   const [manCookie, setManCookie] = useState('');
@@ -51,6 +55,54 @@ export default function App() {
   const [showCookie, setShowCookie] = useState(false);
   const terminalEndRef = useRef(null);
 
+  // Reset the 15-minute token countdown timer
+  const resetSessionTimer = () => {
+    setTimeLeft(900); // 15 minutes
+    setIsTokenExpired(false);
+  };
+
+  // Format seconds into MM:SS
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Keep countdown timer active depending on login status
+  useEffect(() => {
+    if (!configExists || isTokenExpired) {
+      setTimerActive(false);
+      if (isTokenExpired) {
+        setTimeLeft(0);
+      }
+      return;
+    }
+    setTimerActive(true);
+  }, [configExists, isTokenExpired]);
+
+  // Countdown loop
+  useEffect(() => {
+    let interval;
+    if (timerActive && timeLeft > 0) {
+      interval = setInterval(() => {
+        if (isSpamming) {
+          // Keep session alive while actively spamming
+          setTimeLeft(900);
+        } else {
+          setTimeLeft(prev => {
+            if (prev <= 1) {
+              setIsTokenExpired(true);
+              setTimerActive(false);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [timerActive, timeLeft, isSpamming]);
+
   // Fetch initial config
   const fetchConfig = async () => {
     try {
@@ -60,6 +112,7 @@ export default function App() {
         setConfig(data.config);
         setConfigExists(true);
         setIsTokenExpired(false);
+        resetSessionTimer();
         setManToken(data.config.token || '');
         setManCookie(data.config.cookie || '');
         setManIdDot(data.config.id_dot || '');
@@ -114,6 +167,7 @@ export default function App() {
       if (data.success) {
         setCourses(data.data || []);
         setIsTokenExpired(false);
+        resetSessionTimer();
       } else {
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
@@ -235,6 +289,7 @@ export default function App() {
       if (data.success) {
         setShowManual(false);
         fetchConfig();
+        resetSessionTimer();
         alert("Đã lưu cấu hình!");
       } else {
         alert("Lỗi: " + data.message);
@@ -258,6 +313,7 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setClasses(data.data || []);
+        resetSessionTimer();
         if (data.data.length === 0) {
           alert("Không tìm thấy lớp nào phù hợp bộ lọc.");
         }
@@ -454,6 +510,21 @@ export default function App() {
                           <option value="repeat">Học lại / Môn điều kiện</option>
                           <option value="improve">Học cải thiện</option>
                         </select>
+                      </div>
+
+                      <div className="config-item" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px' }}>
+                        <span className="config-key">Thời hạn Token:</span>
+                        <span 
+                          style={{ 
+                            fontWeight: '700', 
+                            fontSize: '0.95rem', 
+                            fontFamily: 'var(--font-mono)', 
+                            color: timeLeft < 180 ? '#fb7185' : '#38bdf8',
+                            textShadow: timeLeft < 180 ? '0 0 8px rgba(244, 63, 94, 0.5)' : '0 0 8px rgba(14, 165, 233, 0.5)'
+                          }}
+                        >
+                          {timeLeft > 0 ? formatTime(timeLeft) : 'HẾT HẠN (00:00)'}
+                        </span>
                       </div>
                     </div>
                   ) : (
