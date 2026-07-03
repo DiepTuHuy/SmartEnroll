@@ -108,8 +108,11 @@ class AppState:
         finally:
             self.is_auto_configuring = False
 
-    def fetch_class_detail(self, class_id):
-        url = "https://portal.ut.edu.vn/api/v1/dkhp/getLopHocPhanDetail"
+    def fetch_class_detail(self, class_id, is_conditional=False):
+        if is_conditional:
+            url = "https://portal.ut.edu.vn/api/v1/dkhpdk/getLopHocPhanDetail"
+        else:
+            url = "https://portal.ut.edu.vn/api/v1/dkhp/getLopHocPhanDetail"
         params = {"idLopHocPhan": class_id}
         for _ in range(3):
             try:
@@ -168,7 +171,6 @@ class AppState:
         self.is_spamming = True
         self.stats = {"total_requests": 0, "success_count": 0, "error_count": 0}
         self.log(f"🔥 Bắt đầu chiến dịch Spam {len(targets)} lớp học phần...")
-        url = "https://portal.ut.edu.vn/api/v1/dkhp/dangKyLopHocPhan"
 
         while self.is_spamming and targets:
             next_round = []
@@ -177,6 +179,12 @@ class AppState:
                     break
                 try:
                     self.stats["total_requests"] += 1
+                    is_cond = t.get('is_conditional', False)
+                    if is_cond:
+                        url = "https://portal.ut.edu.vn/api/v1/dkhpdk/dangKyLopHocPhan"
+                    else:
+                        url = "https://portal.ut.edu.vn/api/v1/dkhp/dangKyLopHocPhan"
+                        
                     params = {
                         "idLopHocPhan": str(t['id']),
                         "g-recaptcha-response": ""
@@ -287,6 +295,8 @@ def get_courses():
         url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanHocLai"
     elif reg_type == 'improve':
         url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanCaiThien"
+    elif reg_type == 'conditional':
+        url = "https://portal.ut.edu.vn/api/v1/dkhpdk/getHocPhanHocLai"
     else:
         url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanHocMoi"
         
@@ -315,33 +325,43 @@ def get_dots():
         if resp.status_code == 200:
             dots = resp.json().get('data') or resp.json().get('body') or []
             return jsonify({"success": True, "data": dots})
-        elif resp.status_code == 401:
-            return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
-        else:
-            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
-    except Exception as e:
-        return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
-
-@app.route('/api/registered', methods=['GET'])
+        elif resp.statu@app.route('/api/registered', methods=['GET'])
 def get_registered_classes():
     if not state.config:
         return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
         
     id_dot = request.args.get('idDot', state.config.get('id_dot'))
-    url = "https://portal.ut.edu.vn/api/v1/dkhp/getLHPDaDangKy"
+    url_normal = "https://portal.ut.edu.vn/api/v1/dkhp/getLHPDaDangKy"
+    url_cond = "https://portal.ut.edu.vn/api/v1/dkhpdk/getLHPDaDangKy"
     params = {"idDot": id_dot}
     
+    registered = []
+    
+    # 1. Fetch normal registered classes
     try:
-        resp = state.session.get(url, params=params, timeout=10)
-        if resp.status_code == 200:
-            registered = resp.json().get('data') or resp.json().get('body') or []
-            return jsonify({"success": True, "data": registered})
-        elif resp.status_code == 401:
+        resp_n = state.session.get(url_normal, params=params, timeout=10)
+        if resp_n.status_code == 200:
+            normal_data = resp_n.json().get('data') or resp_n.json().get('body') or []
+            for item in normal_data:
+                item['isConditional'] = False
+                registered.append(item)
+        elif resp_n.status_code == 401:
             return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
-        else:
-            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
     except Exception as e:
-        return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
+        print("Lỗi fetch registered normal:", e)
+        
+    # 2. Fetch conditional registered classes
+    try:
+        resp_c = state.session.get(url_cond, params=params, timeout=10)
+        if resp_c.status_code == 200:
+            cond_data = resp_c.json().get('data') or resp_c.json().get('body') or []
+            for item in cond_data:
+                item['isConditional'] = True
+                registered.append(item)
+    except Exception as e:
+        print("Lỗi fetch registered conditional:", e)
+        
+    return jsonify({"success": True, "data": registered})
 
 @app.route('/api/deregister', methods=['POST'])
 def deregister_class():
@@ -349,10 +369,15 @@ def deregister_class():
         return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
         
     id_dang_ky = request.json.get('idDangKy')
+    is_conditional = request.json.get('isConditional', False)
     if not id_dang_ky:
         return jsonify({"success": False, "message": "Thiếu mã đăng ký (idDangKy)!"}), 400
         
-    url = "https://portal.ut.edu.vn/api/v1/dkhp/huyDangKy"
+    if is_conditional:
+        url = "https://portal.ut.edu.vn/api/v1/dkhpdk/huyDangKy"
+    else:
+        url = "https://portal.ut.edu.vn/api/v1/dkhp/huyDangKy"
+        
     params = {"idDangKy": str(id_dang_ky)}
     
     try:
@@ -376,11 +401,16 @@ def get_classes():
     target_thu = request.args.get('thu', 'Tất cả')
     target_ca = request.args.get('ca', 'Tất cả')
     id_dot = request.args.get('idDot', state.config.get('id_dot'))
+    is_conditional = request.args.get('isConditional', 'false') == 'true'
     
     if not ma_hp:
         return jsonify({"success": False, "message": "Thiếu mã học phần!"}), 400
 
-    url_list = "https://portal.ut.edu.vn/api/v1/dkhp/getLopHocPhanChoDangKy"
+    if is_conditional:
+        url_list = "https://portal.ut.edu.vn/api/v1/dkhpdk/getLopHocPhanChoDangKy"
+    else:
+        url_list = "https://portal.ut.edu.vn/api/v1/dkhp/getLopHocPhanChoDangKy"
+        
     params = {
         "idDot": id_dot,
         "maHocPhan": ma_hp,
@@ -398,7 +428,7 @@ def get_classes():
         
         for cls in classes:
             cls_id = cls.get('id')
-            details = state.fetch_class_detail(cls_id)
+            details = state.fetch_class_detail(cls_id, is_conditional)
             
             if state.check_filter(details, target_thu, target_ca):
                 schedule = state.format_schedule(details)

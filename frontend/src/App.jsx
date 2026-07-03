@@ -377,7 +377,7 @@ export default function App() {
     setClasses([]);
     try {
       const dot = selectedDot || config?.id_dot;
-      const res = await fetch(`/api/classes?maHocPhan=${selectedCourse}&idDot=${dot}&thu=${encodeURIComponent(filterThu)}&ca=${encodeURIComponent(filterCa)}`);
+      const res = await fetch(`/api/classes?maHocPhan=${selectedCourse}&idDot=${dot}&thu=${encodeURIComponent(filterThu)}&ca=${encodeURIComponent(filterCa)}&isConditional=${regType === 'conditional'}`);
       const data = await res.json();
       if (data.success) {
         setClasses(data.data || []);
@@ -407,8 +407,9 @@ export default function App() {
     if (isChecked) {
       setCheckedClasses(checkedClasses.filter(c => c.id !== cls.id));
     } else {
+      const classWithFlags = { ...cls, is_conditional: regType === 'conditional' };
       const filtered = checkedClasses.filter(c => c.tenMonHoc !== cls.tenMonHoc);
-      setCheckedClasses([...filtered, cls]);
+      setCheckedClasses([...filtered, classWithFlags]);
     }
   };
 
@@ -423,7 +424,11 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targets: checkedClasses.map(c => ({ id: c.id, name: c.tenMonHoc }))
+          targets: checkedClasses.map(c => ({ 
+            id: c.id, 
+            name: c.tenMonHoc,
+            is_conditional: !!c.is_conditional
+          }))
         })
       });
       const data = await res.json();
@@ -581,8 +586,9 @@ export default function App() {
                           style={{ maxWidth: '220px', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
                         >
                           <option value="new">Học mới (Đăng ký học phần)</option>
-                          <option value="repeat">Học lại / Môn điều kiện</option>
+                          <option value="repeat">Học lại</option>
                           <option value="improve">Học cải thiện</option>
+                          <option value="conditional">Môn học điều kiện</option>
                         </select>
                       </div>
 
@@ -918,7 +924,7 @@ export default function App() {
                           </span>
                         </div>
                         <button 
-                          onClick={() => handleDeregisterClass(rcId, rcName)}
+                          onClick={() => handleDeregisterClass(rcId, rcName, rc.isConditional)}
                           className="btn btn-outline"
                           style={{ 
                             width: 'auto', 
