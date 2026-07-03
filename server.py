@@ -325,7 +325,14 @@ def get_dots():
         if resp.status_code == 200:
             dots = resp.json().get('data') or resp.json().get('body') or []
             return jsonify({"success": True, "data": dots})
-        elif resp.statu@app.route('/api/registered', methods=['GET'])
+        elif resp.status_code == 401:
+            return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
+        else:
+            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
+
+@app.route('/api/registered', methods=['GET'])
 def get_registered_classes():
     if not state.config:
         return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
