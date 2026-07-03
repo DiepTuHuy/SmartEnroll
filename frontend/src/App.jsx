@@ -377,7 +377,7 @@ export default function App() {
     setClasses([]);
     try {
       const dot = selectedDot || config?.id_dot;
-      const res = await fetch(`/api/classes?maHocPhan=${selectedCourse}&idDot=${dot}&thu=${encodeURIComponent(filterThu)}&ca=${encodeURIComponent(filterCa)}&isConditional=${regType === 'conditional'}`);
+      const res = await fetch(`/api/classes?maHocPhan=${selectedCourse}&idDot=${dot}&thu=${encodeURIComponent(filterThu)}&ca=${encodeURIComponent(filterCa)}&isConditional=${regType === 'cond_new' || regType === 'cond_repeat'}`);
       const data = await res.json();
       if (data.success) {
         setClasses(data.data || []);
@@ -407,7 +407,7 @@ export default function App() {
     if (isChecked) {
       setCheckedClasses(checkedClasses.filter(c => c.id !== cls.id));
     } else {
-      const classWithFlags = { ...cls, is_conditional: regType === 'conditional' };
+      const classWithFlags = { ...cls, is_conditional: regType === 'cond_new' || regType === 'cond_repeat' };
       const filtered = checkedClasses.filter(c => c.tenMonHoc !== cls.tenMonHoc);
       setCheckedClasses([...filtered, classWithFlags]);
     }
@@ -588,7 +588,8 @@ export default function App() {
                           <option value="new">Học mới (Đăng ký học phần)</option>
                           <option value="repeat">Học lại</option>
                           <option value="improve">Học cải thiện</option>
-                          <option value="conditional">Môn học điều kiện</option>
+                          <option value="cond_new">Môn điều kiện (Học mới)</option>
+                          <option value="cond_repeat">Môn điều kiện (Học lại)</option>
                         </select>
                       </div>
 
