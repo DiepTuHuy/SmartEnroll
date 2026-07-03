@@ -139,13 +139,21 @@ export default function App() {
   }, []);
 
   // Fetch available registration periods
-  const fetchDots = async () => {
+  const fetchDots = async (type) => {
     if (!configExists) return;
+    const isCond = type === 'cond_new' || type === 'cond_repeat';
     try {
-      const res = await fetch('/api/dots');
+      const res = await fetch(`/api/dots?type=${isCond ? 'conditional' : 'normal'}`);
       const data = await res.json();
       if (data.success) {
-        setDots(data.data || []);
+        const loadedDots = data.data || [];
+        setDots(loadedDots);
+        if (loadedDots.length > 0) {
+          const hasCurrent = loadedDots.some(d => (d.id || d.idDot) === selectedDot);
+          if (!hasCurrent) {
+            setSelectedDot(loadedDots[0].id || loadedDots[0].idDot);
+          }
+        }
       } else {
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
@@ -160,9 +168,9 @@ export default function App() {
 
   useEffect(() => {
     if (configExists) {
-      fetchDots();
+      fetchDots(regType);
     }
-  }, [configExists]);
+  }, [configExists, regType]);
 
   // Fetch courses list once config is loaded
   const fetchCourses = async () => {

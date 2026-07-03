@@ -319,7 +319,12 @@ def get_dots():
     if not state.config:
         return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
         
-    url = "https://portal.ut.edu.vn/api/v1/dkhp/getDot"
+    reg_type = request.args.get('type', 'normal')
+    if reg_type == 'conditional':
+        url = "https://portal.ut.edu.vn/api/v1/dkhpdk/getDot"
+    else:
+        url = "https://portal.ut.edu.vn/api/v1/dkhp/getDot"
+        
     try:
         resp = state.session.get(url, timeout=10)
         if resp.status_code == 200:
