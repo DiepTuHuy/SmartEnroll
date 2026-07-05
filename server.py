@@ -31,6 +31,13 @@ def serve_index():
         return app.send_static_file("index.html")
     return "SmartEnroll API Server is running. Static frontend not found."
 
+@app.after_request
+def add_header(r):
+    r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    r.headers["Pragma"] = "no-cache"
+    r.headers["Expires"] = "0"
+    return r
+
 # Lưu config vào thư mục home của người dùng để tránh lỗi phân quyền (Read-only AppTranslocation) khi đóng gói trên macOS/Windows
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".smartenroll_config.json")
 
