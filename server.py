@@ -302,7 +302,9 @@ def get_courses():
         url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanHocLai"
     elif reg_type == 'improve':
         url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanCaiThien"
-    elif reg_type == 'conditional':
+    elif reg_type == 'cond_new':
+        url = "https://portal.ut.edu.vn/api/v1/dkhpdk/getHocPhanHocMoi"
+    elif reg_type == 'cond_repeat' or reg_type == 'conditional':
         url = "https://portal.ut.edu.vn/api/v1/dkhpdk/getHocPhanHocLai"
     else:
         url = "https://portal.ut.edu.vn/api/v1/dkhp/getHocPhanHocMoi"
