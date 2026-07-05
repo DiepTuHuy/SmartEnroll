@@ -428,7 +428,7 @@ def get_classes():
         return jsonify({"success": False, "message": "Thiếu mã học phần!"}), 400
 
     if is_conditional:
-        url_list = "https://portal.ut.edu.vn/api/v1/dkhpdk/getLopHocPhanChoDangKy"
+        url_list = "https://portal.ut.edu.vn/api/v1/dkhpdk/getLopHocPhan"
     else:
         url_list = "https://portal.ut.edu.vn/api/v1/dkhp/getLopHocPhanChoDangKy"
         
