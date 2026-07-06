@@ -68,10 +68,35 @@ class AppState:
             except Exception as e:
                 self.log(f"Lỗi khi di chuyển config.json: {e}")
 
+        # Caching variables to keep token/cookie across manual/auto updates if not supplied
+        if not hasattr(self, '_token_cache'):
+            self._token_cache = None
+        if not hasattr(self, '_cookie_cache'):
+            self._cookie_cache = None
+        if not hasattr(self, '_ua_cache'):
+            self._ua_cache = None
+
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     self.config = json.load(f)
+                    
+                    # Update caches if the loaded ones are present
+                    if self.config.get('token'):
+                        self._token_cache = self.config.get('token')
+                    if self.config.get('cookie'):
+                        self._cookie_cache = self.config.get('cookie')
+                    if self.config.get('user_agent'):
+                        self._ua_cache = self.config.get('user_agent')
+                        
+                    # Backfill empty fields from cache if present
+                    if not self.config.get('token') and self._token_cache:
+                        self.config['token'] = self._token_cache
+                    if not self.config.get('cookie') and self._cookie_cache:
+                        self.config['cookie'] = self._cookie_cache
+                    if not self.config.get('user_agent') and self._ua_cache:
+                        self.config['user_agent'] = self._ua_cache
+                        
                     self.update_session_headers()
                     return True
             except Exception as e:
@@ -86,6 +111,67 @@ class AppState:
                 "Cookie": self.config.get('cookie', ''),
                 "User-Agent": self.config.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             })
+
+    def login_with_credentials(self, username, password):
+        url = "https://portal.ut.edu.vn/api/v1/auth/login"
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        payload = {
+            "username": username,
+            "password": password
+        }
+        try:
+            self.session.cookies.clear()
+            self.session.headers.clear()
+            resp = self.session.post(url, json=payload, headers=headers, timeout=10, verify=False)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success") and data.get("token"):
+                    token = data.get("token")
+                    cookie_str = "; ".join([f"{k}={v}" for k, v in self.session.cookies.items()])
+                    
+                    self.config = {
+                        "api_url": "https://portal.ut.edu.vn/coursesregistration",
+                        "token": token,
+                        "cookie": cookie_str,
+                        "id_dot": self.config.get("id_dot", "76") if self.config else "76",
+                        "user_agent": headers["User-Agent"],
+                        "username": username,
+                        "password": password
+                    }
+                    
+                    # Update cache values
+                    self._token_cache = token
+                    self._cookie_cache = cookie_str
+                    
+                    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                        json.dump(self.config, f, indent=4)
+                    self.update_session_headers()
+                    self.log(f"🔑 Đăng nhập thành công tài khoản: {username}!")
+                    return True
+                else:
+                    self.log(f"❌ Đăng nhập thất bại: {data.get('message')}")
+            else:
+                self.log(f"❌ Đăng nhập thất bại, mã lỗi: {resp.status_code}")
+        except Exception as e:
+            self.log(f"❌ Lỗi kết nối cổng trường: {e}")
+        return False
+
+    def request_with_retry(self, method, url, **kwargs):
+        try:
+            resp = self.session.request(method, url, **kwargs)
+            if resp.status_code == 401:
+                if self.config and self.config.get("username") and self.config.get("password"):
+                    self.log("🔄 Token hết hạn (401). Đang tiến hành gia hạn tự động...")
+                    if self.login_with_credentials(self.config["username"], self.config["password"]):
+                        if "headers" in kwargs and "Authorization" in kwargs["headers"]:
+                            kwargs["headers"]["Authorization"] = f"Bearer {self.config['token']}"
+                        resp = self.session.request(method, url, **kwargs)
+            return resp
+        except Exception as e:
+            raise e
 
     def log(self, message):
         timestamp = time.strftime("%H:%M:%S")
@@ -123,7 +209,7 @@ class AppState:
         params = {"idLopHocPhan": class_id}
         for _ in range(3):
             try:
-                resp = self.session.get(url, params=params, timeout=5)
+                resp = self.request_with_retry("GET", url, params=params, timeout=5)
                 if resp.status_code == 200:
                     return resp.json().get('body') or []
                 time.sleep(0.1)
@@ -196,7 +282,7 @@ class AppState:
                         "idLopHocPhan": str(t['id']),
                         "g-recaptcha-response": ""
                     }
-                    resp = self.session.post(url, params=params, timeout=5)
+                    resp = self.request_with_retry("POST", url, params=params, timeout=5)
                     
                     if resp.status_code == 200:
                         d = resp.json()
@@ -263,7 +349,9 @@ def save_config_manual():
         "token": data.get("token", "").strip(),
         "cookie": data.get("cookie", "").strip(),
         "id_dot": data.get("id_dot", "").strip(),
-        "user_agent": data.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        "user_agent": data.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+        "username": data.get("username", "").strip(),
+        "password": data.get("password", "").strip()
     }
     
     try:
@@ -273,7 +361,31 @@ def save_config_manual():
         return jsonify({"success": True, "message": "Lưu cấu hình thành công!"})
     except Exception as e:
         return jsonify({"success": False, "message": f"Không thể lưu cấu hình: {e}"}), 500
+@app.route('/api/config/login', methods=['POST'])
+def login_portal():
+    data = request.json
+    if not data or not data.get("username") or not data.get("password"):
+        return jsonify({"success": False, "message": "Thiếu tài khoản hoặc mật khẩu!"}), 400
+    
+    username = data.get("username").strip()
+    password = data.get("password").strip()
+    
+    if state.login_with_credentials(username, password):
+        return jsonify({"success": True, "message": "Đăng nhập thành công!", "config": state.config})
+    else:
+        return jsonify({"success": False, "message": "Sai tài khoản hoặc mật khẩu, hoặc hệ thống trường lỗi!"}), 401
 
+@app.route('/api/config/logout', methods=['POST'])
+def logout_portal():
+    try:
+        if os.path.exists(CONFIG_FILE):
+            os.remove(CONFIG_FILE)
+        state.config = None
+        state.session.cookies.clear()
+        state.session.headers.clear()
+        return jsonify({"success": True, "message": "Đăng xuất thành công!"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Không thể đăng xuất: {e}"}), 500
 @app.route('/api/config/auto', methods=['POST'])
 def start_auto_config():
     if state.is_auto_configuring:
@@ -312,7 +424,7 @@ def get_courses():
     params = {"idDot": id_dot}
     
     try:
-        resp = state.session.get(url, params=params, timeout=10)
+        resp = state.request_with_retry("GET", url, params=params, timeout=10)
         if resp.status_code == 200:
             subjects = resp.json().get('data') or resp.json().get('body') or []
             return jsonify({"success": True, "data": subjects})
@@ -335,7 +447,7 @@ def get_dots():
         url = "https://portal.ut.edu.vn/api/v1/dkhp/getDot"
         
     try:
-        resp = state.session.get(url, timeout=10)
+        resp = state.request_with_retry("GET", url, timeout=10)
         if resp.status_code == 200:
             dots = resp.json().get('data') or resp.json().get('body') or []
             return jsonify({"success": True, "data": dots})
@@ -360,7 +472,7 @@ def get_registered_classes():
     
     # 1. Fetch normal registered classes
     try:
-        resp_n = state.session.get(url_normal, params=params, timeout=10)
+        resp_n = state.request_with_retry("GET", url_normal, params=params, timeout=10)
         if resp_n.status_code == 200:
             normal_data = resp_n.json().get('data') or resp_n.json().get('body') or []
             for item in normal_data:
@@ -373,7 +485,7 @@ def get_registered_classes():
         
     # 2. Fetch conditional registered classes
     try:
-        resp_c = state.session.get(url_cond, params=params, timeout=10)
+        resp_c = state.request_with_retry("GET", url_cond, params=params, timeout=10)
         if resp_c.status_code == 200:
             cond_data = resp_c.json().get('data') or resp_c.json().get('body') or []
             for item in cond_data:
@@ -402,7 +514,7 @@ def deregister_class():
     params = {"idDangKy": str(id_dang_ky)}
     
     try:
-        resp = state.session.delete(url, params=params, timeout=10)
+        resp = state.request_with_retry("DELETE", url, params=params, timeout=10)
         if resp.status_code == 200:
             return jsonify(resp.json())
         elif resp.status_code == 401:
@@ -440,7 +552,7 @@ def get_classes():
     }
 
     try:
-        resp = state.session.get(url_list, params=params, timeout=10)
+        resp = state.request_with_retry("GET", url_list, params=params, timeout=10)
         if resp.status_code != 200:
             return jsonify({"success": False, "message": f"Không thể lấy danh sách lớp, mã {resp.status_code}"}), resp.status_code
         

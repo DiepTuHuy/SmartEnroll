@@ -36,6 +36,12 @@ export default function App() {
   const [autoStatus, setAutoStatus] = useState('idle'); // idle, running, success, failed
   const [isAutoRunning, setIsAutoRunning] = useState(false);
 
+  // UTH Credentials login states
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+
   // Course & Class scanning states
   const [courses, setCourses] = useState([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
@@ -121,6 +127,8 @@ export default function App() {
         setManCookie(data.config.cookie || '');
         setManIdDot(data.config.id_dot || '');
         setManUserAgent(data.config.user_agent || '');
+        setUsername(data.config.username || '');
+        setPassword(data.config.password || '');
         if (data.config.id_dot) {
           setSelectedDot(data.config.id_dot);
         }
@@ -128,6 +136,8 @@ export default function App() {
         setConfig(null);
         setConfigExists(false);
         setIsTokenExpired(false);
+        setUsername('');
+        setPassword('');
       }
     } catch (err) {
       console.error("Lỗi lấy cấu hình:", err);
@@ -358,7 +368,9 @@ export default function App() {
           token: manToken,
           cookie: manCookie,
           id_dot: manIdDot,
-          user_agent: manUserAgent
+          user_agent: manUserAgent,
+          username: username,
+          password: password
         })
       });
       const data = await res.json();
@@ -372,6 +384,70 @@ export default function App() {
       }
     } catch (err) {
       alert("Lỗi lưu cấu hình: " + err.message);
+    }
+  };
+
+  // Login handler
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!username || !password) {
+      setLoginError('Vui lòng điền đầy đủ tài khoản và mật khẩu!');
+      return;
+    }
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/config/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (res.status === 200 && data.success) {
+        setConfig(data.config);
+        setConfigExists(true);
+        setIsTokenExpired(false);
+        resetSessionTimer();
+        setManToken(data.config.token || '');
+        setManCookie(data.config.cookie || '');
+        setManIdDot(data.config.id_dot || '');
+        setManUserAgent(data.config.user_agent || '');
+        if (data.config.id_dot) {
+          setSelectedDot(data.config.id_dot);
+        }
+        alert('Đăng nhập cổng UTH thành công!');
+      } else {
+        setLoginError(data.message || 'Tài khoản hoặc mật khẩu không chính xác!');
+      }
+    } catch (err) {
+      console.error(err);
+      setLoginError('Không thể kết nối đến server SmartEnroll!');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  // Logout handler
+  const handleLogout = async () => {
+    if (!window.confirm('Bạn có chắc chắn muốn đăng xuất và xóa tài khoản đã lưu?')) return;
+    try {
+      const res = await fetch('/api/config/logout', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setConfig(null);
+        setConfigExists(false);
+        setUsername('');
+        setPassword('');
+        setManToken('');
+        setManCookie('');
+        setManIdDot('');
+        alert('Đăng xuất thành công!');
+      } else {
+        alert(data.message || 'Lỗi đăng xuất!');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Lỗi kết nối server!');
     }
   };
 
@@ -544,6 +620,23 @@ export default function App() {
                 >
                   {configExists ? (
                     <div className="config-display">
+                      {config && (
+                        <div className="config-item" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className="config-key">Sinh viên đăng nhập:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: '700', color: '#10b981' }}>
+                              {config.username || 'Quét từ Chrome'}
+                            </span>
+                            <button 
+                              onClick={handleLogout} 
+                              className="btn btn-outline" 
+                              style={{ padding: '2px 8px', fontSize: '0.8rem', minHeight: 'auto', border: '1px solid #ef4444', color: '#ef4444' }}
+                            >
+                              Đăng xuất
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div className="config-item">
                         <span className="config-key">Token đăng nhập:</span>
                         <div className="config-value">
@@ -617,23 +710,72 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    <div className="alert alert-danger">
-                      <ShieldAlert className="w-5 h-5 shrink-0" />
-                      <div>
-                        Chưa tìm thấy tệp cấu hình <code>config.json</code>. Vui lòng bấm vào nút tự động lấy token phía dưới.
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div className="alert alert-info" style={{ margin: 0 }}>
+                        <Info className="w-5 h-5 shrink-0 text-sky-400" />
+                        <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
+                          Đăng nhập bằng tài khoản cổng sinh viên UTH để SmartEnroll tự động nạp cấu hình và duy trì phiên hoạt động liên tục.
+                        </div>
                       </div>
+                      
+                      <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Mã số sinh viên (MSSV)</label>
+                          <input 
+                            type="text" 
+                            value={username} 
+                            onChange={(e) => setUsername(e.target.value)} 
+                            placeholder="Nhập MSSV..." 
+                            className="text-input" 
+                            style={{ padding: '8px 12px' }}
+                            required
+                          />
+                        </div>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Mật khẩu cổng UTH</label>
+                          <input 
+                            type="password" 
+                            value={password} 
+                            onChange={(e) => setPassword(e.target.value)} 
+                            placeholder="Nhập mật khẩu..." 
+                            className="text-input" 
+                            style={{ padding: '8px 12px' }}
+                            required
+                          />
+                        </div>
+                        {loginError && (
+                          <div style={{ color: '#fb7185', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                            {loginError}
+                          </div>
+                        )}
+                        <button 
+                          type="submit" 
+                          disabled={loginLoading} 
+                          className="btn btn-primary" 
+                          style={{ width: '100%', marginTop: '4px', display: 'flex', justifyContent: 'center' }}
+                        >
+                          {loginLoading ? 'ĐANG ĐĂNG NHẬP...' : 'ĐĂNG NHẬP CỔNG TRƯỜNG'}
+                        </button>
+                      </form>
                     </div>
                   )}
 
                   {/* AUTO CONFIG LOGIC */}
-                  <div>
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '16px', marginTop: '4px' }}>
+                    {!configExists && (
+                      <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.4)', marginBottom: '8px', textAlign: 'center', letterSpacing: '0.5px' }}>
+                        — HOẶC DÙNG DỰ PHÒNG CHROME —
+                      </div>
+                    )}
                     <button
                       onClick={handleStartAutoConfig}
                       disabled={isAutoRunning}
-                      className="btn btn-primary"
+                      className={configExists ? "btn btn-outline" : "btn btn-outline"}
+                      style={{ width: '100%', display: 'flex', justifyContent: 'center', gap: '8px' }}
                     >
                       <RefreshCw className={`w-4 h-4 ${isAutoRunning ? 'spin-loading' : ''}`} />
-                      {isAutoRunning ? 'ĐANG ĐỌC TỰ ĐỘNG CHROME...' : 'TỰ ĐỘNG LẤY TOKEN & ID ĐỢT'}
+                      {isAutoRunning ? 'ĐANG ĐỌC TỰ ĐỘNG CHROME...' : 'QUÉT TOKEN TỪ CHROME'}
                     </button>
 
                     {/* Step guidance during auto retrieval */}
@@ -644,14 +786,14 @@ export default function App() {
                         className="alert alert-info"
                         style={{ marginTop: '14px', flexDirection: 'column' }}
                       >
-                        <div style={{ fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}>
                           <Info className="w-4 h-4 text-yellow-400 shrink-0" />
                           Hướng dẫn bắt Token và ID Đợt:
                         </div>
-                        <ol className="alert-steps">
-                          <li>Cửa sổ trình duyệt Chrome ẩn danh sẽ khởi động.</li>
-                          <li>Vui lòng <span className="highlight">ĐĂNG NHẬP</span> tài khoản portal của bạn bằng tay.</li>
-                          <li>Hệ thống sẽ tự động quét lấy Token và tìm Đợt đăng ký mới nhất từ API trường rồi đóng Chrome ngay lập tức!</li>
+                        <ol className="alert-steps" style={{ fontSize: '0.8rem', marginTop: '6px' }}>
+                          <li>Trình duyệt Chrome ẩn danh sẽ tự mở ra.</li>
+                          <li>Bạn vui lòng <span className="highlight">ĐĂNG NHẬP</span> tay vào portal.</li>
+                          <li>Hệ thống tự động quét Token, Đợt học và đóng trình duyệt.</li>
                         </ol>
                       </motion.div>
                     )}
@@ -659,14 +801,14 @@ export default function App() {
                     {/* Feedback states */}
                     {autoStatus === 'success' && !isAutoRunning && (
                       <div className="alert alert-success" style={{ marginTop: '12px' }}>
-                        <CheckCircle2 className="w-4 h-4" />
-                        Đã nạp Token và ID Đợt thành công! Trình duyệt đã tắt.
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        Nạp Token từ Chrome thành công!
                       </div>
                     )}
                     {autoStatus === 'failed' && !isAutoRunning && (
                       <div className="alert alert-danger" style={{ marginTop: '12px' }}>
-                        <XCircle className="w-4 h-4" />
-                        Có lỗi xảy ra hoặc bạn đã đóng Chrome sớm. Hãy thử lại.
+                        <XCircle className="w-4 h-4 text-rose-400" />
+                        Không tìm thấy cấu hình. Hãy thử lại.
                       </div>
                     )}
                   </div>
@@ -702,6 +844,28 @@ export default function App() {
                       required
                     />
                   </div>
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="input-label">Mã số sinh viên (MSSV)</label>
+                      <input 
+                        type="text" 
+                        value={username} 
+                        onChange={(e) => setUsername(e.target.value)} 
+                        placeholder="Không bắt buộc..." 
+                        className="text-input" 
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="input-label">Mật khẩu Portal UTH</label>
+                      <input 
+                        type="password" 
+                        value={password} 
+                        onChange={(e) => setPassword(e.target.value)} 
+                        placeholder="Không bắt buộc..." 
+                        className="text-input" 
+                      />
+                    </div>
+                  </div>
                   <div className="grid-3">
                     <div className="form-group">
                       <label className="input-label">ID Đợt học</label>
@@ -709,19 +873,19 @@ export default function App() {
                         type="text" 
                         value={manIdDot} 
                         onChange={(e) => setManIdDot(e.target.value)} 
-                        placeholder="76..."
-                        className="text-input"
+                        placeholder="76..." 
+                        className="text-input" 
                         required
                       />
                     </div>
-                    <div className="form-group">
+                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
                       <label className="input-label">User Agent</label>
                       <input 
                         type="text" 
                         value={manUserAgent} 
                         onChange={(e) => setManUserAgent(e.target.value)} 
-                        placeholder="Mozilla/5.0..."
-                        className="text-input"
+                        placeholder="Mozilla/5.0..." 
+                        className="text-input" 
                         required
                       />
                     </div>

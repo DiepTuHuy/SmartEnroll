@@ -351,7 +351,9 @@ def get_auto_config():
                 "token": found_token.replace("Bearer ", "").strip(),
                 "cookie": current_cookie_str if current_cookie_str else old_config.get("cookie", ""),
                 "id_dot": final_id_dot,
-                "user_agent": user_agent
+                "user_agent": user_agent,
+                "username": old_config.get("username", ""),
+                "password": old_config.get("password", "")
             }
             
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
