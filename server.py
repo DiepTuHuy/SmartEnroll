@@ -294,7 +294,6 @@ class AppState:
                     if d.get("success"):
                         self.log(f"🎉 ĐĂNG KÝ THÀNH CÔNG: {t['name']} (ID: {t['id']})")
                         self.stats["success_count"] += 1
-                        self.is_spamming = False  # Tự động dừng spam khi đăng ký thành công
                         return {"status": "success", "target": t}
                     elif "đã đăng ký" in msg or "Trùng lịch học" in msg:
                         self.log(f"ℹ️ {t['name']}: {msg}")
