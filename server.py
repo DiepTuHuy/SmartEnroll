@@ -55,6 +55,10 @@ class AppState:
         self.auto_config_thread = None
         self.auto_config_status = "idle"  # idle, running, success, failed
         self.session = requests.Session()
+        # Tăng kích thước Pool để tối ưu hóa kết nối song song và tái sử dụng Keep-Alive
+        adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=200, max_retries=1)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
         self.config = None
         self.load_config_data()
 
@@ -260,60 +264,87 @@ class AppState:
                 return True
         return False
 
-    def run_spam_loop(self, targets):
+    def run_spam_loop(self, targets, mode="normal"):
         self.is_spamming = True
         self.stats = {"total_requests": 0, "success_count": 0, "error_count": 0}
-        self.log(f"🔥 Bắt đầu chiến dịch Spam {len(targets)} lớp học phần...")
+        self.log(f"🔥 Bắt đầu chiến dịch Spam {len(targets)} lớp ở chế độ {mode.upper()}...")
+
+        import concurrent.futures
+
+        def register_class(t):
+            if not self.is_spamming:
+                return None
+            try:
+                is_cond = t.get('is_conditional', False)
+                if is_cond:
+                    url = "https://portal.ut.edu.vn/api/v1/dkhpdk/dangKyLopHocPhan"
+                else:
+                    url = "https://portal.ut.edu.vn/api/v1/dkhp/dangKyLopHocPhan"
+                    
+                params = {
+                    "idLopHocPhan": str(t['id']),
+                    "g-recaptcha-response": ""
+                }
+                resp = self.request_with_retry("POST", url, params=params, timeout=5)
+                self.stats["total_requests"] += 1
+                
+                if resp.status_code == 200:
+                    d = resp.json()
+                    msg = d.get("message", "")
+                    if d.get("success"):
+                        self.log(f"🎉 ĐĂNG KÝ THÀNH CÔNG: {t['name']} (ID: {t['id']})")
+                        self.stats["success_count"] += 1
+                        return {"status": "success", "target": t}
+                    elif "đã đăng ký" in msg or "Trùng lịch học" in msg:
+                        self.log(f"ℹ️ {t['name']}: {msg}")
+                        self.stats["success_count"] += 1
+                        return {"status": "already", "target": t}
+                    else:
+                        self.log(f"⚠️ {t['name']}: {msg}")
+                        self.stats["error_count"] += 1
+                        return {"status": "failed", "target": t}
+                elif resp.status_code == 401:
+                    self.log("💀 Token hết hạn! Vui lòng đăng nhập lại.")
+                    self.is_spamming = False
+                    return {"status": "expired", "target": t}
+                else:
+                    self.log(f"🔥 Lỗi HTTP {resp.status_code} khi đăng ký {t['name']}")
+                    self.stats["error_count"] += 1
+                    return {"status": "failed", "target": t}
+            except Exception as e:
+                self.log(f"❌ Lỗi mạng khi đăng ký {t['name']}: {e}")
+                self.stats["error_count"] += 1
+                return {"status": "failed", "target": t}
 
         while self.is_spamming and targets:
             next_round = []
-            for t in targets:
-                if not self.is_spamming:
-                    break
-                try:
-                    self.stats["total_requests"] += 1
-                    is_cond = t.get('is_conditional', False)
-                    if is_cond:
-                        url = "https://portal.ut.edu.vn/api/v1/dkhpdk/dangKyLopHocPhan"
-                    else:
-                        url = "https://portal.ut.edu.vn/api/v1/dkhp/dangKyLopHocPhan"
-                        
-                    params = {
-                        "idLopHocPhan": str(t['id']),
-                        "g-recaptcha-response": ""
-                    }
-                    resp = self.request_with_retry("POST", url, params=params, timeout=5)
-                    
-                    if resp.status_code == 200:
-                        d = resp.json()
-                        msg = d.get("message", "")
-                        if d.get("success"):
-                            self.log(f"🎉 ĐĂNG KÝ THÀNH CÔNG: {t['name']} (ID: {t['id']})")
-                            self.stats["success_count"] += 1
-                        elif "đã đăng ký" in msg or "Trùng lịch học" in msg:
-                            self.log(f"ℹ️ {t['name']}: {msg}")
-                            self.stats["success_count"] += 1  # count as success since we don't need to register again
-                        else:
-                            self.log(f"⚠️ {t['name']}: {msg}")
-                            next_round.append(t)
-                            self.stats["error_count"] += 1
-                    elif resp.status_code == 401:
-                        self.log("💀 Token hết hạn! Vui lòng làm mới cấu hình.")
-                        self.is_spamming = False
-                        break
-                    else:
-                        self.log(f"🔥 Lỗi HTTP {resp.status_code} khi đăng ký {t['name']}")
-                        next_round.append(t)
-                        self.stats["error_count"] += 1
-                except Exception as e:
-                    self.log(f"❌ Lỗi mạng khi đăng ký {t['name']}: {e}")
-                    next_round.append(t)
-                    self.stats["error_count"] += 1
-                time.sleep(0.5)  # Rest to avoid rate limit / IP block
             
+            if mode == "turbo":
+                # TURBO MODE: Spam concurrently using ThreadPool
+                max_workers = min(len(targets) * 2, 12)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(register_class, t): t for t in targets}
+                    for future in concurrent.futures.as_completed(futures):
+                        res = future.result()
+                        if res and res["status"] == "failed":
+                            next_round.append(res["target"])
+                
+                if self.is_spamming and next_round:
+                    time.sleep(0.1) # Tiny sleep to avoid CPU lockup but stay ultra-fast
+            else:
+                # NORMAL MODE: Sequential, 0.5s delay
+                for t in targets:
+                    if not self.is_spamming:
+                        break
+                    res = register_class(t)
+                    if res and res["status"] == "failed":
+                        next_round.append(res["target"])
+                    time.sleep(0.5)
+                
+                if self.is_spamming and next_round:
+                    time.sleep(1.0)
+
             targets = next_round
-            if self.is_spamming and targets:
-                time.sleep(1.5)
 
         self.log("⏹ Đã dừng Spam.")
         self.is_spamming = False
@@ -593,12 +624,13 @@ def start_spam():
     
     data = request.json
     targets = data.get("targets", [])
+    mode = data.get("mode", "normal")
     if not targets:
         return jsonify({"success": False, "message": "Danh sách đăng ký trống!"}), 400
         
-    state.spam_thread = threading.Thread(target=state.run_spam_loop, args=(targets,), daemon=True)
+    state.spam_thread = threading.Thread(target=state.run_spam_loop, args=(targets, mode), daemon=True)
     state.spam_thread.start()
-    return jsonify({"success": True, "message": "Đã bắt đầu spam..."})
+    return jsonify({"success": True, "message": f"Đã bắt đầu spam ở chế độ {mode.upper()}..."})
 
 @app.route('/api/spam/stop', methods=['POST'])
 def stop_spam():

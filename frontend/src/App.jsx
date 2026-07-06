@@ -57,6 +57,7 @@ export default function App() {
 
   // Spam states
   const [isSpamming, setIsSpamming] = useState(false);
+  const [spamMode, setSpamMode] = useState('normal'); // normal, turbo
   const [spamStats, setSpamStats] = useState({ total_requests: 0, success_count: 0, error_count: 0 });
   const [logs, setLogs] = useState([]);
   
@@ -508,6 +509,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          mode: spamMode,
           targets: checkedClasses.map(c => ({ 
             id: c.id, 
             name: c.tenMonHoc,
@@ -1311,6 +1313,45 @@ export default function App() {
                 </div>
               )}
               <div ref={terminalEndRef} />
+            </div>
+
+            {/* Speed Mode Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.02)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', marginBottom: '14px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Chế độ Tốc độ:</span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setSpamMode('normal')}
+                  disabled={isSpamming}
+                  className="btn"
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '0.75rem',
+                    minHeight: 'auto',
+                    background: spamMode === 'normal' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                    border: spamMode === 'normal' ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                    color: spamMode === 'normal' ? '#38bdf8' : 'rgba(255,255,255,0.6)',
+                    cursor: isSpamming ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  ⚡ Thường (An toàn)
+                </button>
+                <button
+                  onClick={() => setSpamMode('turbo')}
+                  disabled={isSpamming}
+                  className="btn"
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '0.75rem',
+                    minHeight: 'auto',
+                    background: spamMode === 'turbo' ? 'rgba(244, 63, 94, 0.2)' : 'transparent',
+                    border: spamMode === 'turbo' ? '1px solid #f43f5e' : '1px solid rgba(255,255,255,0.1)',
+                    color: spamMode === 'turbo' ? '#f43f5e' : 'rgba(255,255,255,0.6)',
+                    cursor: isSpamming ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  🚀 Turbo (Gửi song song)
+                </button>
+              </div>
             </div>
 
             {/* Play / Stop Action Button */}
