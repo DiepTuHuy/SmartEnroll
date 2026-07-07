@@ -6,6 +6,8 @@ import threading
 import time
 import requests
 import sys
+import random
+import string
 from auto_config import get_auto_config
 import urllib3.util.connection as connection
 import socket
@@ -79,6 +81,7 @@ class AppState:
         self.is_auto_configuring = False
         self.auto_config_thread = None
         self.auto_config_status = "idle"  # idle, running, success, failed
+        self.last_login_error = ""
         self.session = requests.Session()
         # Tăng kích thước Pool để tối ưu hóa kết nối song song và tái sử dụng Keep-Alive
         adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=200, max_retries=1)
@@ -142,15 +145,20 @@ class AppState:
             })
 
     def login_with_credentials(self, username, password):
-        url = "https://portal.ut.edu.vn/api/v1/auth/login"
+        fake_captcha = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(32))
+        url = f"https://portal.ut.edu.vn/api/v1/user/login?g-recaptcha-response={fake_captcha}"
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Origin": "https://portal.ut.edu.vn",
+            "Referer": "https://portal.ut.edu.vn/login"
         }
         payload = {
             "username": username,
             "password": password
         }
+        self.last_login_error = ""
         try:
             self.session.cookies.clear()
             self.session.headers.clear()
@@ -203,10 +211,13 @@ class AppState:
                     self.log(f"🔑 Đăng nhập thành công tài khoản: {username}!")
                     return True
                 else:
-                    self.log(f"❌ Đăng nhập thất bại: {data.get('message')}")
+                    self.last_login_error = data.get('message', 'Sai tài khoản hoặc mật khẩu!')
+                    self.log(f"❌ Đăng nhập thất bại: {self.last_login_error}")
             else:
+                self.last_login_error = f"Portal trả về mã {resp.status_code}"
                 self.log(f"❌ Đăng nhập thất bại, mã lỗi: {resp.status_code}")
         except Exception as e:
+            self.last_login_error = f"Không thể kết nối cổng trường: {e}"
             self.log(f"❌ Lỗi kết nối cổng trường: {e}")
         return False
 
@@ -451,7 +462,8 @@ def login_portal():
     if state.login_with_credentials(username, password):
         return jsonify({"success": True, "message": "Đăng nhập thành công!", "config": state.config})
     else:
-        return jsonify({"success": False, "message": "Sai tài khoản hoặc mật khẩu, hoặc hệ thống trường lỗi!"}), 401
+        err_msg = state.last_login_error or "Sai tài khoản hoặc mật khẩu, hoặc hệ thống trường lỗi!"
+        return jsonify({"success": False, "message": err_msg}), 401
 
 @app.route('/api/config/logout', methods=['POST'])
 def logout_portal():
