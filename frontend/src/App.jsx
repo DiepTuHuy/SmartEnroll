@@ -149,6 +149,17 @@ export default function App() {
     fetchConfig();
   }, []);
 
+  // Periodic config sync to keep session timer fresh when background auto-refresher updates token
+  useEffect(() => {
+    let interval;
+    if (configExists && !isTokenExpired) {
+      interval = setInterval(() => {
+        fetchConfig();
+      }, 30000); // Poll every 30 seconds
+    }
+    return () => clearInterval(interval);
+  }, [configExists, isTokenExpired]);
+
   // Fetch available registration periods
   const fetchDots = async (type) => {
     if (!configExists) return;

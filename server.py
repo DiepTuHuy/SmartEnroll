@@ -89,6 +89,9 @@ class AppState:
         self.session.mount("https://", adapter)
         self.config = None
         self.load_config_data()
+        
+        # Bắt đầu luồng chạy ngầm tự động gia hạn token sau mỗi 10 phút
+        threading.Thread(target=self.run_token_refresher_loop, daemon=True).start()
 
     def load_config_data(self):
         # Tự động di chuyển config.json cũ sang thư mục home nếu chưa di chuyển
@@ -130,11 +133,36 @@ class AppState:
                         self.config['user_agent'] = self._ua_cache
                         
                     self.update_session_headers()
-                    return True
+                    
+                # Tự động gia hạn token ngay khi khởi động phần mềm nếu có tài khoản lưu trữ
+                if self.config and self.config.get("username") and self.config.get("password"):
+                    try:
+                        test_resp = self.session.get("https://portal.ut.edu.vn/api/v1/dkhp/getDot", timeout=3, verify=False)
+                        if test_resp.status_code == 401:
+                            self.log("🔄 Phát hiện token cũ đã hết hạn. Đang tự động đăng nhập lại...")
+                            self.login_with_credentials(self.config["username"], self.config["password"])
+                    except Exception as e:
+                        pass
+                return True
             except Exception as e:
                 self.log(f"Lỗi đọc config.json: {e}")
         self.config = None
         return False
+
+    def run_token_refresher_loop(self):
+        while True:
+            # Chờ 10 phút (600 giây) trước mỗi lần gia hạn
+            time.sleep(600)
+            if self.config and self.config.get("username") and self.config.get("password"):
+                self.log("🔄 [Auto-Refresher] Đang tiến hành gia hạn tự động token cổng trường định kỳ (10 phút)...")
+                try:
+                    success = self.login_with_credentials(self.config["username"], self.config["password"])
+                    if success:
+                        self.log("✅ [Auto-Refresher] Tự động gia hạn token thành công!")
+                    else:
+                        self.log("❌ [Auto-Refresher] Tự động gia hạn token thất bại!")
+                except Exception as e:
+                    self.log(f"⚠️ [Auto-Refresher] Lỗi khi gia hạn token tự động: {e}")
 
     def update_session_headers(self):
         if self.config:
