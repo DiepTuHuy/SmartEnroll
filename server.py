@@ -161,11 +161,33 @@ class AppState:
                     token = data.get("token")
                     cookie_str = "; ".join([f"{k}={v}" for k, v in self.session.cookies.items()])
                     
+                    # Tự động lấy ID Đợt học mới nhất từ cổng trường ngay sau khi đăng nhập thành công
+                    dot_url = "https://portal.ut.edu.vn/api/v1/dkhp/getDot"
+                    dot_headers = {
+                        "Authorization": f"Bearer {token}",
+                        "Cookie": cookie_str,
+                        "User-Agent": headers["User-Agent"]
+                    }
+                    latest_dot = self.config.get("id_dot", "76") if self.config else "76"
+                    try:
+                        # Tạm thời gán headers cho session để gửi request
+                        self.session.headers.update(dot_headers)
+                        dot_resp = self.session.get(dot_url, timeout=5, verify=False)
+                        if dot_resp.status_code == 200:
+                            dot_data = dot_resp.json().get('data') or dot_resp.json().get('body') or []
+                            if dot_data:
+                                dot_ids = [str(d.get('id') or d.get('idDot')) for d in dot_data if d.get('id') or d.get('idDot')]
+                                if dot_ids:
+                                    latest_dot = dot_ids[0]
+                                    self.log(f"📅 Tự động quét và cấu hình ID Đợt học mới nhất: {latest_dot}")
+                    except Exception as e:
+                        self.log(f"⚠️ Không thể tự động quét đợt học sau đăng nhập: {e}")
+
                     self.config = {
                         "api_url": "https://portal.ut.edu.vn/coursesregistration",
                         "token": token,
                         "cookie": cookie_str,
-                        "id_dot": self.config.get("id_dot", "76") if self.config else "76",
+                        "id_dot": latest_dot,
                         "user_agent": headers["User-Agent"],
                         "username": username,
                         "password": password
