@@ -7,7 +7,32 @@ import time
 import requests
 import sys
 from auto_config import get_auto_config
+import urllib3.util.connection as connection
+import socket
 
+# Dynamic DNS Caching for UTH Portal to eliminate DNS lookup latency
+dns_cache = {}
+original_create_connection = connection.create_connection
+
+def custom_create_connection(address, *args, **kwargs):
+    host, port = address
+    if host == "portal.ut.edu.vn":
+        if host not in dns_cache:
+            try:
+                ips = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+                if ips:
+                    resolved_ip = ips[0][4][0]
+                    dns_cache[host] = resolved_ip
+                    print(f"📡 [DNS Cache] Resolved {host} -> {resolved_ip}")
+            except Exception as e:
+                print(f"⚠️ [DNS Cache] Failed to resolve {host}: {e}")
+        
+        if host in dns_cache:
+            return original_create_connection((dns_cache[host], port), *args, **kwargs)
+            
+    return original_create_connection(address, *args, **kwargs)
+
+connection.create_connection = custom_create_connection
 # Import ca hoc mapping
 CA_HOC = {
     "Ca 1 (Tiết 1-3)":   [1, 2, 3],
