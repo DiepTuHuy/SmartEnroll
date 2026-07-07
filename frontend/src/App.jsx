@@ -54,6 +54,7 @@ export default function App() {
   const [classes, setClasses] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
   const [checkedClasses, setCheckedClasses] = useState([]); // Array of checked class IDs
+  const [hideConflicting, setHideConflicting] = useState(false); // Hide conflicting classes toggle
 
   // Spam states
   const [isSpamming, setIsSpamming] = useState(false);
@@ -1108,6 +1109,11 @@ export default function App() {
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             Mã lớp: {rcCode} ({rcCredits} TC)
                           </span>
+                          {rc.scheduleText && (
+                            <span style={{ fontSize: '0.7rem', color: '#38bdf8', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              📅 {rc.scheduleText}
+                            </span>
+                          )}
                         </div>
                         <button 
                           onClick={() => handleDeregisterClass(rcId, rcName, rc.isConditional)}
@@ -1159,16 +1165,28 @@ export default function App() {
                 </p>
               </div>
 
-              {checkedClasses.length > 0 && (
-                <button 
-                  onClick={handleClearSelection}
-                  className="btn btn-outline"
-                  style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem' }}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Xóa chọn ({checkedClasses.length})
-                </button>
-              )}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <input
+                    type="checkbox"
+                    checked={hideConflicting}
+                    onChange={(e) => setHideConflicting(e.target.checked)}
+                    style={{ cursor: 'pointer', margin: 0 }}
+                  />
+                  <span>Ẩn lớp trùng lịch</span>
+                </label>
+
+                {checkedClasses.length > 0 && (
+                  <button 
+                    onClick={handleClearSelection}
+                    className="btn btn-outline"
+                    style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem' }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Xóa chọn ({checkedClasses.length})
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="table-container" style={{ flex: '1', minHeight: '220px' }}>
@@ -1193,7 +1211,7 @@ export default function App() {
                     </thead>
                     <tbody>
                       <AnimatePresence>
-                        {classes.map((cls, idx) => {
+                        {classes.filter(cls => !hideConflicting || !cls.is_conflicting).map((cls, idx) => {
                           const isSelected = checkedClasses.some(c => c.id === cls.id);
                           return (
                             <motion.tr 
@@ -1203,7 +1221,8 @@ export default function App() {
                               exit={{ opacity: 0 }}
                               transition={{ delay: idx * 0.02 }}
                               onClick={() => handleToggleClass(cls)}
-                              className={isSelected ? 'selected' : ''}
+                              className={`${isSelected ? 'selected' : ''}`}
+                              style={{ opacity: cls.is_conflicting ? 0.6 : 1 }}
                             >
                               <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
                                 <input 
@@ -1215,7 +1234,14 @@ export default function App() {
                               </td>
                               <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: '600' }}>{cls.maLopHocPhan}</td>
                               <td style={{ fontWeight: '600' }}>{cls.tenMonHoc}</td>
-                              <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{cls.schedule}</td>
+                              <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                <div>{cls.schedule}</div>
+                                {cls.is_conflicting && (
+                                  <div style={{ color: '#f43f5e', fontSize: '0.7rem', marginTop: '3px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                    ⚠️ Trùng: {cls.conflict_with}
+                                  </div>
+                                )}
+                              </td>
                               <td>
                                 <div className="progress-container">
                                   <span className={`percent-text ${cls.status.includes("FULL") ? 'full' : 'available'}`}>

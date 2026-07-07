@@ -91,6 +91,7 @@ class AppState:
         self.load_config_data()
         
         # Bắt đầu luồng chạy ngầm tự động gia hạn token sau mỗi 10 phút
+        self.registered_classes_schedules = {}
         threading.Thread(target=self.run_token_refresher_loop, daemon=True).start()
 
     def load_config_data(self):
@@ -319,6 +320,58 @@ class AppState:
             phong_text = f" - P.{phong}" if phong else ""
             parts.append(f"{thu_text} (Tiết {tiet}){phong_text}")
         return " | ".join(parts)
+
+    def parse_periods(self, tiet_str):
+        periods = set()
+        if not tiet_str:
+            return periods
+        tiet_str = str(tiet_str)
+        parts = tiet_str.split(',')
+        for part in parts:
+            part = part.strip()
+            if '-' in part:
+                try:
+                    start, end = map(int, part.split('-'))
+                    periods.update(range(start, end + 1))
+                except Exception:
+                    pass
+            else:
+                try:
+                    periods.add(int(part))
+                except Exception:
+                    pass
+        return periods
+
+    def get_conflict_details(self, details_a):
+        # Checks if details_a (scanned class) conflicts with any registered classes
+        # Returns a dict: {"conflicting": True, "conflict_with": "Môn B [Lớp Y]"} or {"conflicting": False}
+        if not details_a or not self.registered_classes_schedules:
+            return {"conflicting": False}
+            
+        for sa in details_a:
+            thu_a = str(sa.get("thu", ""))
+            periods_a = self.parse_periods(sa.get("tietHoc", ""))
+            if not thu_a or not periods_a:
+                continue
+                
+            for rc_id, info in self.registered_classes_schedules.items():
+                rc_name = info.get("name", "Môn học đã đăng ký")
+                rc_code = info.get("code", "")
+                rc_schedules = info.get("schedules", [])
+                
+                for sb in rc_schedules:
+                    thu_b = str(sb.get("thu", ""))
+                    periods_b = self.parse_periods(sb.get("tietHoc", ""))
+                    if not thu_b or not periods_b:
+                        continue
+                        
+                    if thu_a == thu_b:
+                        if periods_a.intersection(periods_b):
+                            return {
+                                "conflicting": True,
+                                "conflict_with": f"{rc_name} (Lớp {rc_code})"
+                            }
+        return {"conflicting": False}
 
     def check_filter(self, details, target_thu, target_ca):
         if not details:
@@ -612,6 +665,45 @@ def get_registered_classes():
     except Exception as e:
         print("Lỗi fetch registered conditional:", e)
         
+    # Tải lịch học chi tiết của các lớp đã đăng ký song song để làm cơ sở check trùng lịch
+    if registered:
+        import concurrent.futures
+        def fetch_schedule(item):
+            rc_id = item.get('id') or item.get('idDangKy')
+            if not rc_id:
+                return None
+            try:
+                # Cả môn điều kiện và môn thường đều dùng chung endpoint dkhp/getLichHoc
+                url = "https://portal.ut.edu.vn/api/v1/dkhp/getLichHoc"
+                resp = state.request_with_retry("GET", url, params={"idDangKy": str(rc_id)}, timeout=5)
+                if resp.status_code == 200:
+                    schedules = resp.json().get('body') or []
+                    return rc_id, schedules
+            except Exception as ex:
+                print(f"Lỗi lấy lịch cho lớp {rc_id}:", ex)
+            return rc_id, []
+
+        schedules_map = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(registered), 10)) as executor:
+            results = executor.map(fetch_schedule, registered)
+            for res in results:
+                if res:
+                    rc_id, scheds = res
+                    schedules_map[rc_id] = scheds
+
+        # Lưu lịch học đã được cache lại vào AppState
+        state.registered_classes_schedules = {}
+        for item in registered:
+            rc_id = item.get('id') or item.get('idDangKy')
+            scheds = schedules_map.get(rc_id, [])
+            item['schedules'] = scheds
+            item['scheduleText'] = state.format_schedule(scheds)
+            state.registered_classes_schedules[rc_id] = {
+                "name": item.get('tenMonHoc') or item.get('tenLopHocPhan') or item.get('tenHocPhan'),
+                "code": item.get('maLopHocPhan') or item.get('maHocPhan') or '',
+                "schedules": scheds
+            }
+            
     return jsonify({"success": True, "data": registered})
 
 @app.route('/api/deregister', methods=['POST'])
@@ -689,6 +781,10 @@ def get_classes():
                 if percent >= 100 or not cho_dk:
                     status_text += " (FULL)"
                 
+                conflict_info = state.get_conflict_details(details)
+                is_conflicting = conflict_info.get("conflicting", False)
+                conflict_with = conflict_info.get("conflict_with", "")
+
                 filtered_classes.append({
                     "id": cls_id,
                     "maLopHocPhan": cls.get('maLopHocPhan'),
@@ -696,7 +792,9 @@ def get_classes():
                     "schedule": schedule,
                     "status": status_text,
                     "capacity_percent": percent,
-                    "open": cho_dk
+                    "open": cho_dk,
+                    "is_conflicting": is_conflicting,
+                    "conflict_with": conflict_with
                 })
                 time.sleep(0.05) # Tiny sleep to prevent school server spam during query
                 
