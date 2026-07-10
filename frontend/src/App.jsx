@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Settings, Play, Square, RefreshCw, Search, Check, AlertCircle, 
   Terminal, ShieldAlert, Cpu, Layers, HelpCircle, CheckSquare, 
-  Trash2, Eye, EyeOff, CheckCircle2, XCircle, Info, ChevronDown
+  Trash2, Eye, EyeOff, CheckCircle2, XCircle, Info, ChevronDown, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -55,6 +55,9 @@ export default function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [checkedClasses, setCheckedClasses] = useState([]); // Array of checked class IDs
   const [hideConflicting, setHideConflicting] = useState(false); // Hide conflicting classes toggle
+  const [customDialog, setCustomDialog] = useState(null); // Custom alert/confirm modal dialog
+  const [showLoginOverlay, setShowLoginOverlay] = useState(true); // Fullscreen login modal on app entry
+  const [showPassword, setShowPassword] = useState(false); // Toggle password field visibility
 
   // Spam states
   const [isSpamming, setIsSpamming] = useState(false);
@@ -66,6 +69,19 @@ export default function App() {
   const [showToken, setShowToken] = useState(false);
   const [showCookie, setShowCookie] = useState(false);
   const terminalEndRef = useRef(null);
+
+  // Locally override standard browser alert and confirm with modern custom modal promises
+  const alert = (msg) => {
+    return new Promise((resolve) => {
+      setCustomDialog({ type: 'alert', message: msg, resolve });
+    });
+  };
+
+  const confirm = (msg) => {
+    return new Promise((resolve) => {
+      setCustomDialog({ type: 'confirm', message: msg, resolve });
+    });
+  };
 
   // Reset the 15-minute token countdown timer
   const resetSessionTimer = () => {
@@ -214,7 +230,7 @@ export default function App() {
           setIsTokenExpired(true);
           setCourses([]);
         } else {
-          alert("Lỗi tải môn học: " + data.message);
+          await alert("Lỗi tải môn học: " + data.message);
         }
       }
     } catch (err) {
@@ -253,7 +269,7 @@ export default function App() {
 
   // Deregister a class section
   const handleDeregisterClass = async (idDangKy, className) => {
-    const confirmDeregister = window.confirm(`Bạn có chắc chắn muốn hủy đăng ký lớp "${className}" không?`);
+    const confirmDeregister = await confirm(`Bạn có chắc chắn muốn hủy đăng ký lớp "${className}" không?`);
     if (!confirmDeregister) return;
 
     try {
@@ -264,20 +280,20 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        alert("Hủy đăng ký thành công!");
+        await alert("Hủy đăng ký thành công!");
         resetSessionTimer();
         fetchRegisteredClasses(); // Reload list
       } else {
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
           setTimeLeft(0);
-          alert("Lỗi hủy đăng ký: Phiên đăng nhập (Token) của bạn đã hết hạn. Vui lòng bấm lấy lại Token!");
+          await alert("Lỗi hủy đăng ký: Phiên đăng nhập (Token) của bạn đã hết hạn. Vui lòng bấm lấy lại Token!");
         } else {
-          alert("Lỗi hủy đăng ký: " + data.message);
+          await alert("Lỗi hủy đăng ký: " + data.message);
         }
       }
     } catch (err) {
-      alert("Lỗi mạng khi hủy đăng ký: " + err.message);
+      await alert("Lỗi mạng khi hủy đăng ký: " + err.message);
     }
   };
 
@@ -359,7 +375,7 @@ export default function App() {
       const res = await fetch('/api/config/auto', { method: 'POST' });
       const data = await res.json();
       if (!data.success) {
-        alert(data.message);
+        await alert(data.message);
         setIsAutoRunning(false);
         setAutoStatus('failed');
       }
@@ -391,12 +407,12 @@ export default function App() {
         setShowManual(false);
         fetchConfig();
         resetSessionTimer();
-        alert("Đã lưu cấu hình!");
+        await alert("Đã lưu cấu hình!");
       } else {
-        alert("Lỗi: " + data.message);
+        await alert("Lỗi: " + data.message);
       }
     } catch (err) {
-      alert("Lỗi lưu cấu hình: " + err.message);
+      await alert("Lỗi lưu cấu hình: " + err.message);
     }
   };
 
@@ -428,7 +444,8 @@ export default function App() {
         if (data.config.id_dot) {
           setSelectedDot(data.config.id_dot);
         }
-        alert('Đăng nhập cổng UTH thành công!');
+        setShowLoginOverlay(false);
+        await alert('Đăng nhập cổng UTH thành công!');
       } else {
         setLoginError(data.message || 'Tài khoản hoặc mật khẩu không chính xác!');
       }
@@ -442,7 +459,7 @@ export default function App() {
 
   // Logout handler
   const handleLogout = async () => {
-    if (!window.confirm('Bạn có chắc chắn muốn đăng xuất và xóa tài khoản đã lưu?')) return;
+    if (!(await confirm('Bạn có chắc chắn muốn đăng xuất và xóa tài khoản đã lưu?'))) return;
     try {
       const res = await fetch('/api/config/logout', { method: 'POST' });
       const data = await res.json();
@@ -454,20 +471,21 @@ export default function App() {
         setManToken('');
         setManCookie('');
         setManIdDot('');
-        alert('Đăng xuất thành công!');
+        setShowLoginOverlay(true);
+        await alert('Đăng xuất thành công!');
       } else {
-        alert(data.message || 'Lỗi đăng xuất!');
+        await alert(data.message || 'Lỗi đăng xuất!');
       }
     } catch (err) {
       console.error(err);
-      alert('Lỗi kết nối server!');
+      await alert('Lỗi kết nối server!');
     }
   };
 
   // Scan classes
   const handleScanClasses = async () => {
     if (!selectedCourse) {
-      alert("Vui lòng chọn môn học để quét!");
+      await alert("Vui lòng chọn môn học để quét!");
       return;
     }
     setIsScanning(true);
@@ -480,19 +498,19 @@ export default function App() {
         setClasses(data.data || []);
         resetSessionTimer();
         if (data.data.length === 0) {
-          alert("Không tìm thấy lớp nào phù hợp bộ lọc.");
+          await alert("Không tìm thấy lớp nào phù hợp bộ lọc.");
         }
       } else {
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
           setTimeLeft(0);
-          alert("Lỗi quét lớp: Phiên đăng nhập (Token) của bạn đã hết hạn hoặc bị hủy trên máy chủ trường. Vui lòng bấm lấy lại Token!");
+          await alert("Lỗi quét lớp: Phiên đăng nhập (Token) của bạn đã hết hạn hoặc bị hủy trên máy chủ trường. Vui lòng bấm lấy lại Token!");
         } else {
-          alert("Lỗi quét lớp: " + data.message);
+          await alert("Lỗi quét lớp: " + data.message);
         }
       }
     } catch (err) {
-      alert("Lỗi mạng: " + err.message);
+      await alert("Lỗi mạng: " + err.message);
     } finally {
       setIsScanning(false);
     }
@@ -513,7 +531,7 @@ export default function App() {
   // Start Spamming
   const handleStartSpam = async () => {
     if (checkedClasses.length === 0) {
-      alert("Vui lòng tích chọn lớp học phần muốn đăng ký!");
+      await alert("Vui lòng tích chọn lớp học phần muốn đăng ký!");
       return;
     }
     try {
@@ -533,10 +551,10 @@ export default function App() {
       if (data.success) {
         setIsSpamming(true);
       } else {
-        alert("Lỗi: " + data.message);
+        await alert("Lỗi: " + data.message);
       }
     } catch (err) {
-      alert("Lỗi khởi động spam: " + err.message);
+      await alert("Lỗi khởi động spam: " + err.message);
     }
   };
 
@@ -747,15 +765,36 @@ export default function App() {
                         </div>
                         <div className="form-group" style={{ margin: 0 }}>
                           <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Mật khẩu cổng UTH</label>
-                          <input 
-                            type="password" 
-                            value={password} 
-                            onChange={(e) => setPassword(e.target.value)} 
-                            placeholder="Nhập mật khẩu..." 
-                            className="text-input" 
-                            style={{ padding: '8px 12px' }}
-                            required
-                          />
+                          <div style={{ position: 'relative' }}>
+                            <input 
+                              type={showPassword ? "text" : "password"} 
+                              value={password} 
+                              onChange={(e) => setPassword(e.target.value)} 
+                              placeholder="Nhập mật khẩu..." 
+                              className="text-input" 
+                              style={{ padding: '8px 40px 8px 12px', width: '100%' }}
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              style={{
+                                position: 'absolute',
+                                right: '12px',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                color: 'rgba(255, 255, 255, 0.4)',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center'
+                              }}
+                            >
+                              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
                         </div>
                         {loginError && (
                           <div style={{ color: '#fb7185', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1419,6 +1458,236 @@ export default function App() {
         </div>
 
       </div>
+
+      {/* 🔐 SCREEN OVERLAY: LOGIN ON APP ENTRY */}
+      {showLoginOverlay && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'radial-gradient(circle at center, rgba(16, 12, 34, 0.98) 0%, rgba(5, 3, 15, 0.99) 100%)',
+          backdropFilter: 'blur(20px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <motion.div
+            initial={{ opacity: 0, y: 30, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            style={{
+              background: 'rgba(23, 20, 41, 0.75)',
+              border: '1px solid rgba(56, 189, 248, 0.15)',
+              borderRadius: '24px',
+              padding: '36px',
+              maxWidth: '460px',
+              width: '100%',
+              boxShadow: '0 30px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 40px rgba(14, 165, 233, 0.05)',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Glowing background details */}
+            <div style={{ position: 'absolute', top: '-10%', left: '-10%', width: '150px', height: '150px', background: 'var(--accent-glow)', filter: 'blur(60px)', opacity: 0.2, pointerEvents: 'none' }}></div>
+            
+            <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+              <div style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '16px',
+                background: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px auto',
+                boxShadow: '0 8px 20px rgba(14, 165, 233, 0.3)'
+              }}>
+                <ShieldCheck className="w-8 h-8 text-white" />
+              </div>
+              <h1 style={{ fontSize: '1.6rem', fontWeight: '800', background: 'linear-gradient(135deg, #fff 0%, #cbd5e1 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '6px' }}>
+                SmartEnroll UTH
+              </h1>
+              <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
+                Công cụ hỗ trợ đăng ký học phần tối ưu & thông minh
+              </p>
+            </div>
+            
+            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Mã số sinh viên (MSSV)</label>
+                <input 
+                  type="text" 
+                  value={username} 
+                  onChange={(e) => setUsername(e.target.value)} 
+                  placeholder="Nhập MSSV..." 
+                  className="text-input" 
+                  style={{ padding: '12px 14px', fontSize: '0.9rem' }}
+                  required
+                />
+              </div>
+              
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Mật khẩu cổng UTH</label>
+                <div style={{ position: 'relative' }}>
+                  <input 
+                    type={showPassword ? "text" : "password"} 
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)} 
+                    placeholder="Nhập mật khẩu..." 
+                    className="text-input" 
+                    style={{ padding: '12px 42px 12px 14px', width: '100%', fontSize: '0.9rem' }}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: '14px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'rgba(255, 255, 255, 0.4)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              
+              {loginError && (
+                <div style={{ color: '#fb7185', fontSize: '0.825rem', display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(244, 63, 94, 0.08)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(244, 63, 94, 0.15)' }}>
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+                <button 
+                  type="submit" 
+                  disabled={loginLoading} 
+                  className="btn btn-primary" 
+                  style={{ width: '100%', padding: '12px', display: 'flex', justifyContent: 'center', fontSize: '0.9rem', fontWeight: '600' }}
+                >
+                  {loginLoading ? 'ĐANG ĐĂNG NHẬP...' : 'XÁC NHẬN ĐĂNG NHẬP'}
+                </button>
+                
+                {configExists && (
+                  <button 
+                    type="button" 
+                    onClick={() => setShowLoginOverlay(false)} 
+                    className="btn btn-outline" 
+                    style={{ width: '100%', padding: '12px', fontSize: '0.85rem' }}
+                  >
+                    Bỏ qua & Vào thẳng Dashboard
+                  </button>
+                )}
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* 🔔 CUSTOM NOTIFICATION / CONFIRMATION DIALOG MODAL */}
+      <AnimatePresence>
+        {customDialog && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(5, 3, 15, 0.85)',
+            backdropFilter: 'blur(12px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            padding: '20px'
+          }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: -10 }}
+              style={{
+                background: 'rgba(23, 20, 41, 0.95)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '16px',
+                padding: '24px',
+                maxWidth: '440px',
+                width: '100%',
+                boxShadow: '0 20px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
+                textAlign: 'center'
+              }}
+            >
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '12px',
+                background: customDialog.type === 'confirm' ? 'rgba(56, 189, 248, 0.1)' : 'rgba(251, 113, 133, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px auto',
+                color: customDialog.type === 'confirm' ? '#38bdf8' : '#fb7185'
+              }}>
+                {customDialog.type === 'confirm' ? <HelpCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
+              </div>
+              
+              <h3 style={{
+                fontSize: '1.05rem',
+                fontWeight: '600',
+                color: '#fff',
+                marginBottom: '10px'
+              }}>
+                {customDialog.type === 'confirm' ? 'Xác nhận yêu cầu' : 'Thông báo hệ thống'}
+              </h3>
+              
+              <p style={{
+                fontSize: '0.875rem',
+                color: 'rgba(255,255,255,0.7)',
+                lineHeight: '1.5',
+                marginBottom: '24px'
+              }}>
+                {customDialog.message}
+              </p>
+              
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                {customDialog.type === 'confirm' && (
+                  <button
+                    onClick={() => {
+                      customDialog.resolve(false);
+                      setCustomDialog(null);
+                    }}
+                    className="btn btn-outline"
+                    style={{ flex: 1, padding: '10px' }}
+                  >
+                    Hủy bỏ
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    customDialog.resolve(true);
+                    setCustomDialog(null);
+                  }}
+                  className="btn btn-primary"
+                  style={{ flex: 1, padding: '10px' }}
+                >
+                  Đồng ý
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
