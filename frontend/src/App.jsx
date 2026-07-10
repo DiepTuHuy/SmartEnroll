@@ -71,9 +71,14 @@ export default function App() {
   const terminalEndRef = useRef(null);
 
   // Locally override standard browser alert and confirm with modern custom modal promises
-  const alert = (msg) => {
+  const alert = (msg, status = 'success') => {
+    let detectedStatus = status;
+    const lowerMsg = msg.toLowerCase();
+    if (lowerMsg.includes('lỗi') || lowerMsg.includes('thất bại') || lowerMsg.includes('hết hạn') || lowerMsg.includes('chưa')) {
+      detectedStatus = 'error';
+    }
     return new Promise((resolve) => {
-      setCustomDialog({ type: 'alert', message: msg, resolve });
+      setCustomDialog({ type: 'alert', status: detectedStatus, message: msg, resolve });
     });
   };
 
@@ -1632,14 +1637,22 @@ export default function App() {
                 width: '48px',
                 height: '48px',
                 borderRadius: '12px',
-                background: customDialog.type === 'confirm' ? 'rgba(56, 189, 248, 0.1)' : 'rgba(251, 113, 133, 0.1)',
+                background: customDialog.type === 'confirm' 
+                  ? 'rgba(56, 189, 248, 0.1)' 
+                  : (customDialog.status === 'success' ? 'rgba(52, 211, 153, 0.1)' : 'rgba(244, 63, 94, 0.1)'),
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 margin: '0 auto 16px auto',
-                color: customDialog.type === 'confirm' ? '#38bdf8' : '#fb7185'
+                color: customDialog.type === 'confirm' 
+                  ? '#38bdf8' 
+                  : (customDialog.status === 'success' ? '#34d399' : '#fb7185')
               }}>
-                {customDialog.type === 'confirm' ? <HelpCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
+                {customDialog.type === 'confirm' ? (
+                  <HelpCircle className="w-6 h-6" />
+                ) : (
+                  customDialog.status === 'success' ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />
+                )}
               </div>
               
               <h3 style={{
