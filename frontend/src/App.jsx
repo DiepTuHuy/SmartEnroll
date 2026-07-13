@@ -620,132 +620,145 @@ export default function App() {
         </div>
       </motion.header>
 
-      {/* MAIN CONTAINER */}
-      <div className="main-grid">
-        
-        {/* LEFT COLUMN: CONFIG & SCANNER */}
-        <div className="col-flex">
-          
-          {/* CONFIGURATION CARD */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="card"
+      {/* 🛠️ TOP CONFIGURATION BAR (FULL WIDTH CONTROL CENTER) */}
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="card"
+        style={{ marginBottom: '24px' }}
+      >
+        <div className="card-header">
+          <h2 className="card-title purple">
+            <Settings className="w-5 h-5" />
+            Cấu hình Đăng nhập & Đợt
+          </h2>
+          <button 
+            onClick={() => setShowManual(!showManual)}
+            className="btn-text"
           >
-            <div className="card-header">
-              <h2 className="card-title purple">
-                <Settings className="w-5 h-5" />
-                Cấu hình Đăng nhập & Đợt
-              </h2>
-              <button 
-                onClick={() => setShowManual(!showManual)}
-                className="btn-text"
-              >
-                {showManual ? 'Hiện trạng thái' : 'Cập nhật thủ công'}
-              </button>
-            </div>
+            {showManual ? 'Hiện trạng thái' : 'Cập nhật thủ công'}
+          </button>
+        </div>
 
-            <AnimatePresence mode="wait">
-              {!showManual ? (
-                <motion.div 
-                  key="status"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
-                >
-                  {configExists ? (
-                    <div className="config-display">
-                      {config && (
-                        <div className="config-item" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span className="config-key">Sinh viên đăng nhập:</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: '700', color: '#10b981' }}>
-                              {config.username || 'Quét từ Chrome'}
-                            </span>
-                            <button 
-                              onClick={handleLogout} 
-                              className="btn btn-outline" 
-                              style={{ padding: '2px 8px', fontSize: '0.8rem', minHeight: 'auto', border: '1px solid #ef4444', color: '#ef4444' }}
-                            >
-                              Đăng xuất
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="config-item">
-                        <span className="config-key">Token đăng nhập:</span>
-                        <div className="config-value">
-                          <span>{showToken ? config.token : '••••••••••••••••••••••••'}</span>
-                          <button onClick={() => setShowToken(!showToken)} className="eye-button">
-                            {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="config-item">
-                        <span className="config-key">Cookie Portal UTH:</span>
-                        <div className="config-value">
-                          <span style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {showCookie ? config.cookie : '••••••••••••••••••••••••'}
+        <AnimatePresence mode="wait">
+          {!showManual ? (
+            <motion.div 
+              key="status"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
+            >
+              {configExists ? (
+                <div>
+                  <div 
+                    className="config-display"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                      gap: '16px',
+                      background: 'rgba(0, 0, 0, 0.25)',
+                      border: '1px solid rgba(255, 255, 255, 0.05)',
+                      borderRadius: '14px',
+                      padding: '16px'
+                    }}
+                  >
+                    {config && (
+                      <div className="config-item" style={{ border: 'none', padding: 0, flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                        <span className="config-key" style={{ fontSize: '0.75rem' }}>Sinh viên đăng nhập:</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: '700', color: '#10b981', fontSize: '0.9rem' }}>
+                            {config.username || 'Quét từ Chrome'}
                           </span>
-                          <button onClick={() => setShowCookie(!showCookie)} className="eye-button">
-                            {showCookie ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          <button 
+                            onClick={handleLogout} 
+                            className="btn btn-outline" 
+                            style={{ padding: '2px 8px', fontSize: '0.75rem', minHeight: 'auto', border: '1px solid #ef4444', color: '#ef4444' }}
+                          >
+                            Đăng xuất
                           </button>
                         </div>
                       </div>
-                      
-                      <div className="config-item" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px' }}>
-                        <span className="config-key">Chọn Đợt học:</span>
-                        <select 
-                          value={selectedDot} 
-                          onChange={(e) => setSelectedDot(e.target.value)}
-                          className="select-input"
-                          style={{ maxWidth: '220px', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
-                        >
-                          {dots.length > 0 ? (
-                            dots.map(d => (
-                              <option key={d.id || d.idDot} value={d.id || d.idDot}>
-                                {d.tenHocKy || d.tenDot || d.id || d.idDot}
-                              </option>
-                            ))
-                          ) : (
-                            <option value={config.id_dot}>{config.id_dot}</option>
-                          )}
-                        </select>
-                      </div>
-
-                      <div className="config-item">
-                        <span className="config-key">Loại Đăng ký:</span>
-                        <select 
-                          value={regType} 
-                          onChange={(e) => setRegType(e.target.value)}
-                          className="select-input"
-                          style={{ maxWidth: '220px', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
-                        >
-                          <option value="new">Học mới (Đăng ký học phần)</option>
-                          <option value="repeat">Học lại</option>
-                          <option value="improve">Học cải thiện</option>
-                          <option value="cond_new">Môn điều kiện (Học mới)</option>
-                          <option value="cond_repeat">Môn điều kiện (Học lại)</option>
-                        </select>
-                      </div>
-
-                      <div className="config-item" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px' }}>
-                        <span className="config-key">Thời hạn Token:</span>
-                        <span 
-                          style={{ 
-                            fontWeight: '700', 
-                            fontSize: '0.95rem', 
-                            fontFamily: 'var(--font-mono)', 
-                            color: timeLeft < 180 ? '#fb7185' : '#38bdf8',
-                            textShadow: timeLeft < 180 ? '0 0 8px rgba(244, 63, 94, 0.5)' : '0 0 8px rgba(14, 165, 233, 0.5)'
-                          }}
-                        >
-                          {timeLeft > 0 ? formatTime(timeLeft) : 'HẾT HẠN (00:00)'}
+                    )}
+                    
+                    <div className="config-item" style={{ border: 'none', padding: 0, flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                      <span className="config-key" style={{ fontSize: '0.75rem' }}>Token đăng nhập:</span>
+                      <div className="config-value" style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
+                          {showToken ? config.token : '••••••••••••••••••••••••'}
                         </span>
+                        <button onClick={() => setShowToken(!showToken)} className="eye-button">
+                          {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
+
+                    <div className="config-item" style={{ border: 'none', padding: 0, flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                      <span className="config-key" style={{ fontSize: '0.75rem' }}>Cookie Portal UTH:</span>
+                      <div className="config-value" style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
+                          {showCookie ? config.cookie : '••••••••••••••••••••••••'}
+                        </span>
+                        <button onClick={() => setShowCookie(!showCookie)} className="eye-button">
+                          {showCookie ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="config-item" style={{ border: 'none', padding: 0, flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                      <span className="config-key" style={{ fontSize: '0.75rem' }}>Chọn Đợt học:</span>
+                      <select 
+                        value={selectedDot} 
+                        onChange={(e) => setSelectedDot(e.target.value)}
+                        className="select-input"
+                        style={{ width: '100%', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 10px', fontSize: '0.8rem' }}
+                      >
+                        {dots.length > 0 ? (
+                          dots.map(d => (
+                            <option key={d.id || d.idDot} value={d.id || d.idDot}>
+                              {d.tenHocKy || d.tenDot || d.id || d.idDot}
+                            </option>
+                          ))
+                        ) : (
+                          <option value={config.id_dot}>{config.id_dot}</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="config-item" style={{ border: 'none', padding: 0, flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                      <span className="config-key" style={{ fontSize: '0.75rem' }}>Loại Đăng ký:</span>
+                      <select 
+                        value={regType} 
+                        onChange={(e) => setRegType(e.target.value)}
+                        className="select-input"
+                        style={{ width: '100%', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 10px', fontSize: '0.8rem' }}
+                      >
+                        <option value="new">Học mới (Đăng ký học phần)</option>
+                        <option value="repeat">Học lại</option>
+                        <option value="improve">Học cải thiện</option>
+                        <option value="cond_new">Môn điều kiện (Học mới)</option>
+                        <option value="cond_repeat">Môn điều kiện (Học lại)</option>
+                      </select>
+                    </div>
+
+                    <div className="config-item" style={{ border: 'none', padding: 0, flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                      <span className="config-key" style={{ fontSize: '0.75rem' }}>Thời hạn Token:</span>
+                      <span 
+                        style={{ 
+                          fontWeight: '700', 
+                          fontSize: '1rem', 
+                          fontFamily: 'var(--font-mono)', 
+                          color: timeLeft < 180 ? '#fb7185' : '#38bdf8',
+                          textShadow: timeLeft < 180 ? '0 0 8px rgba(244, 63, 94, 0.5)' : '0 0 8px rgba(14, 165, 233, 0.5)',
+                          marginTop: '2px'
+                        }}
+                      >
+                        {timeLeft > 0 ? formatTime(timeLeft) : 'HẾT HẠN (00:00)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       <div className="alert alert-info" style={{ margin: 0 }}>
@@ -966,7 +979,13 @@ export default function App() {
                 </motion.form>
               )}
             </AnimatePresence>
-          </motion.div>
+      </motion.div>
+
+      {/* MAIN CONTAINER */}
+      <div className="main-grid">
+        
+        {/* LEFT COLUMN: SCAN & AVAILABLE CLASSES */}
+        <div className="col-flex">
 
           {/* CLASS SCANNER CARD */}
           <motion.div 
@@ -1095,101 +1114,6 @@ export default function App() {
               </button>
             </div>
           </motion.div>
-
-          {/* REGISTERED CLASSES CARD */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3 }}
-            className="card"
-            style={{ marginTop: '16px' }}
-          >
-            <div className="card-header" style={{ marginBottom: '14px' }}>
-              <h2 className="card-title purple">
-                <CheckSquare className="w-5 h-5" />
-                3. Học phần đã đăng ký thành công
-              </h2>
-              <button 
-                onClick={fetchRegisteredClasses}
-                disabled={registeredLoading || !configExists}
-                className="eye-button"
-                title="Tải lại danh sách lớp đã đăng ký"
-                style={{ padding: '6px' }}
-              >
-                <RefreshCw className={`w-4 h-4 ${registeredLoading ? 'spin-loading' : ''}`} />
-              </button>
-            </div>
-
-            <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
-              {registeredLoading ? (
-                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  Đang tải danh sách học phần đã đăng ký...
-                </div>
-              ) : registeredClasses.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {registeredClasses.map((rc, idx) => {
-                    const rcId = rc.id || rc.idDangKy;
-                    const rcName = rc.tenLopHocPhan || rc.tenHocPhan || rc.tenMonHoc || 'Học phần';
-                    const rcCode = rc.maLopHocPhan || rc.maHocPhan || '';
-                    const rcCredits = rc.soTinChi || 0;
-                    return (
-                      <div 
-                        key={idx} 
-                        style={{ 
-                          background: 'rgba(255, 255, 255, 0.02)', 
-                          border: '1px solid rgba(255, 255, 255, 0.05)', 
-                          borderRadius: '8px', 
-                          padding: '10px 14px', 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center',
-                          gap: '10px'
-                        }}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
-                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {rcName}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            Mã lớp: {rcCode} ({rcCredits} TC)
-                          </span>
-                          {rc.scheduleText && (
-                            <span style={{ fontSize: '0.7rem', color: '#38bdf8', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              📅 {rc.scheduleText}
-                            </span>
-                          )}
-                        </div>
-                        <button 
-                          onClick={() => handleDeregisterClass(rcId, rcName, rc.isConditional)}
-                          className="btn btn-outline"
-                          style={{ 
-                            width: 'auto', 
-                            padding: '6px 12px', 
-                            fontSize: '0.75rem', 
-                            borderColor: 'rgba(244, 63, 94, 0.4)', 
-                            color: '#fb7185',
-                            background: 'rgba(244, 63, 94, 0.05)'
-                          }}
-                        >
-                          Hủy đăng ký
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dark)', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                  Chưa có môn nào đã đăng ký trong đợt này.
-                </div>
-              )}
-            </div>
-          </motion.div>
-
-        </div>
-
-        {/* RIGHT COLUMN: SCAN RESULTS & SPAM CONSOLE */}
-        <div className="col-flex">
-          
           {/* SCAN RESULTS TABLE */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }}
@@ -1341,6 +1265,99 @@ export default function App() {
             )}
           </motion.div>
 
+        </div>
+
+        {/* RIGHT COLUMN: SCAN RESULTS & SPAM CONSOLE */}
+        <div className="col-flex">
+          
+          {/* REGISTERED CLASSES CARD */}
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+            className="card"
+            style={{ marginTop: '16px' }}
+          >
+            <div className="card-header" style={{ marginBottom: '14px' }}>
+              <h2 className="card-title purple">
+                <CheckSquare className="w-5 h-5" />
+                3. Học phần đã đăng ký thành công
+              </h2>
+              <button 
+                onClick={fetchRegisteredClasses}
+                disabled={registeredLoading || !configExists}
+                className="eye-button"
+                title="Tải lại danh sách lớp đã đăng ký"
+                style={{ padding: '6px' }}
+              >
+                <RefreshCw className={`w-4 h-4 ${registeredLoading ? 'spin-loading' : ''}`} />
+              </button>
+            </div>
+
+            <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+              {registeredLoading ? (
+                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Đang tải danh sách học phần đã đăng ký...
+                </div>
+              ) : registeredClasses.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {registeredClasses.map((rc, idx) => {
+                    const rcId = rc.id || rc.idDangKy;
+                    const rcName = rc.tenLopHocPhan || rc.tenHocPhan || rc.tenMonHoc || 'Học phần';
+                    const rcCode = rc.maLopHocPhan || rc.maHocPhan || '';
+                    const rcCredits = rc.soTinChi || 0;
+                    return (
+                      <div 
+                        key={idx} 
+                        style={{ 
+                          background: 'rgba(255, 255, 255, 0.02)', 
+                          border: '1px solid rgba(255, 255, 255, 0.05)', 
+                          borderRadius: '8px', 
+                          padding: '10px 14px', 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          gap: '10px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {rcName}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Mã lớp: {rcCode} ({rcCredits} TC)
+                          </span>
+                          {rc.scheduleText && (
+                            <span style={{ fontSize: '0.7rem', color: '#38bdf8', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              📅 {rc.scheduleText}
+                            </span>
+                          )}
+                        </div>
+                        <button 
+                          onClick={() => handleDeregisterClass(rcId, rcName, rc.isConditional)}
+                          className="btn btn-outline"
+                          style={{ 
+                            width: 'auto', 
+                            padding: '6px 12px', 
+                            fontSize: '0.75rem', 
+                            borderColor: 'rgba(244, 63, 94, 0.4)', 
+                            color: '#fb7185',
+                            background: 'rgba(244, 63, 94, 0.05)'
+                          }}
+                        >
+                          Hủy đăng ký
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dark)', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                  Chưa có môn nào đã đăng ký trong đợt này.
+                </div>
+              )}
+            </div>
+          </motion.div>
           {/* SPAM ACTION PANEL */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }}
