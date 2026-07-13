@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, make_response
 from flask_cors import CORS
 import json
 import os
@@ -18,23 +18,20 @@ original_create_connection = connection.create_connection
 
 def custom_create_connection(address, *args, **kwargs):
     host, port = address
-    if host == "portal.ut.edu.vn":
-        if host not in dns_cache:
-            try:
-                ips = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-                if ips:
-                    resolved_ip = ips[0][4][0]
-                    dns_cache[host] = resolved_ip
-                    print(f"📡 [DNS Cache] Resolved {host} -> {resolved_ip}")
-            except Exception as e:
-                print(f"⚠️ [DNS Cache] Failed to resolve {host}: {e}")
-        
-        if host in dns_cache:
-            return original_create_connection((dns_cache[host], port), *args, **kwargs)
-            
+    if host == "portal.ut.edu.vn" and host in dns_cache:
+        address = (dns_cache[host], port)
     return original_create_connection(address, *args, **kwargs)
 
 connection.create_connection = custom_create_connection
+
+def resolve_dns_early():
+    try:
+        ip = socket.gethostbyname("portal.ut.edu.vn")
+        dns_cache["portal.ut.edu.vn"] = ip
+        print(f"📡 [DNS Cache] Resolved portal.ut.edu.vn -> {ip}")
+    except Exception as e:
+        print(f"⚠️ [DNS Cache] Failed to resolve portal.ut.edu.vn: {e}")
+
 # Import ca hoc mapping
 CA_HOC = {
     "Ca 1 (Tiết 1-3)":   [1, 2, 3],
@@ -61,8 +58,18 @@ def add_header(response):
 
 @app.route("/")
 def serve_index():
-    if os.path.exists(os.path.join(app.static_folder, "index.html")):
-        return app.send_static_file("index.html")
+    index_path = os.path.join(app.static_folder, "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
+        buster = str(int(time.time()))
+        # Inject cache buster to script src and link href
+        html = html.replace('.js"', f'.js?v={buster}"')
+        html = html.replace('.css"', f'.css?v={buster}"')
+        
+        response = make_response(html)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        return response
     return "SmartEnroll API Server is running. Static frontend not found."
 
 @app.after_request
