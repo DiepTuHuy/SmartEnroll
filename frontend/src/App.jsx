@@ -686,7 +686,7 @@ export default function App() {
                       <div className="config-item">
                         <span className="config-key">Cookie Portal UTH:</span>
                         <div className="config-value">
-                          <span style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span>
                             {showCookie ? config.cookie : '••••••••••••••••••••••••'}
                           </span>
                           <button onClick={() => setShowCookie(!showCookie)} className="eye-button">
