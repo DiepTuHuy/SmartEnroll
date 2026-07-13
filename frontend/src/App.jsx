@@ -1210,7 +1210,7 @@ export default function App() {
               </div>
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', whiteSpace: 'nowrap' }}>
                   <input
                     type="checkbox"
                     checked={hideConflicting}
