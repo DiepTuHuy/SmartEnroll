@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Settings, Play, Square, RefreshCw, Search, Check, AlertCircle, 
   Terminal, ShieldAlert, Cpu, Layers, HelpCircle, CheckSquare, 
-  Trash2, Eye, EyeOff, CheckCircle2, XCircle, Info, ChevronDown, ShieldCheck
+  Trash2, Eye, EyeOff, CheckCircle2, XCircle, Info, ChevronDown, ShieldCheck,
+  Share2, ExternalLink, Image, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -70,6 +71,22 @@ export default function App() {
   const [showCookie, setShowCookie] = useState(false);
   const terminalEndRef = useRef(null);
 
+  // Active tab state: 'enroll' or 'drl'
+  const [activeTab, setActiveTab] = useState('enroll');
+  // DRL feature states
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareStep, setShareStep] = useState('');
+  const [shareError, setShareError] = useState(null);
+  const [shareStatus, setShareStatus] = useState('idle');
+
+  // Facebook credentials states
+  const [fbUsername, setFbUsername] = useState('');
+  const [fbPassword, setFbPassword] = useState('');
+  const [showFbPassword, setShowFbPassword] = useState(false);
+  const [editFbLogin, setEditFbLogin] = useState(false);
+
   // Locally override standard browser alert and confirm with modern custom modal promises
   const alert = (msg, status = 'success') => {
     let detectedStatus = status;
@@ -86,6 +103,106 @@ export default function App() {
     return new Promise((resolve) => {
       setCustomDialog({ type: 'confirm', message: msg, resolve });
     });
+  };
+
+  // Fetch UTH announcements/events from server
+  const fetchAnnouncements = async () => {
+    if (!configExists) return;
+    setAnnouncementsLoading(true);
+    try {
+      const res = await fetch('/api/announcements');
+      const data = await res.json();
+      if (data.success) {
+        setAnnouncements(data.data || []);
+      } else {
+        await alert("Không thể tải danh sách sự kiện: " + data.message);
+      }
+    } catch (err) {
+      console.error("Lỗi cào sự kiện:", err);
+    } finally {
+      setAnnouncementsLoading(false);
+    }
+  };
+
+  // Save Facebook login credentials directly from DRL tab
+  const handleSaveFacebookCredentials = async (e) => {
+    e.preventDefault();
+    if (!fbUsername || !fbPassword) {
+      await alert("Vui lòng điền đầy đủ tài khoản và mật khẩu Facebook!");
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/config/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: manToken,
+          cookie: manCookie,
+          id_dot: manIdDot,
+          user_agent: manUserAgent,
+          username: username,
+          password: password,
+          fb_username: fbUsername,
+          fb_password: fbPassword
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEditFbLogin(false);
+        fetchConfig();
+        await alert("Lưu tài khoản Facebook thành công!");
+      } else {
+        await alert("Lỗi lưu tài khoản Facebook: " + data.message);
+      }
+    } catch (err) {
+      await alert("Lỗi kết nối lưu cấu hình: " + err.message);
+    }
+  };
+
+  // Run the Facebook auto-sharing flow and poll progress status
+  const handleShareFacebook = async (eventId, title) => {
+    setShowShareModal(true);
+    setShareStep('Đang khởi động tiến trình chia sẻ...');
+    setShareError(null);
+    setShareStatus('running');
+    
+    try {
+      const res = await fetch('/api/share/facebook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, title })
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setShareStatus('error');
+        setShareError(data.message);
+        return;
+      }
+      
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch('/api/share/status');
+          const statusData = await statusRes.json();
+          setShareStatus(statusData.status);
+          setShareStep(statusData.step);
+          setShareError(statusData.error);
+          
+          if (statusData.status === 'success' || statusData.status === 'error') {
+            clearInterval(pollInterval);
+            if (statusData.status === 'success') {
+              fetchAnnouncements(); // Refresh list to show screenshots
+            }
+          }
+        } catch (err) {
+          console.error("Lỗi thăm dò trạng thái:", err);
+        }
+      }, 1000);
+      
+    } catch (err) {
+      setShareStatus('error');
+      setShareError(err.message);
+    }
   };
 
   // Reset the 15-minute token countdown timer
@@ -152,6 +269,8 @@ export default function App() {
         setManUserAgent(data.config.user_agent || '');
         setUsername(data.config.username || '');
         setPassword(data.config.password || '');
+        setFbUsername(data.config.fb_username || '');
+        setFbPassword(data.config.fb_password || '');
         if (data.config.id_dot) {
           setSelectedDot(data.config.id_dot);
         }
@@ -215,6 +334,12 @@ export default function App() {
       fetchDots(regType);
     }
   }, [configExists, regType]);
+
+  useEffect(() => {
+    if (configExists && activeTab === 'drl') {
+      fetchAnnouncements();
+    }
+  }, [configExists, activeTab]);
 
   // Fetch courses list once config is loaded
   const fetchCourses = async () => {
@@ -404,7 +529,9 @@ export default function App() {
           id_dot: manIdDot,
           user_agent: manUserAgent,
           username: username,
-          password: password
+          password: password,
+          fb_username: fbUsername,
+          fb_password: fbPassword
         })
       });
       const data = await res.json();
@@ -597,7 +724,7 @@ export default function App() {
       >
         <div className="brand-wrapper">
           <div className="brand-icon">
-            <Cpu className="w-8 h-8 text-purple-400" />
+            <Cpu className="w-6 h-6" />
           </div>
           <div>
             <h1 className="app-title">SmartEnroll UTH</h1>
@@ -605,6 +732,33 @@ export default function App() {
           </div>
         </div>
         
+        <div style={{ display: 'flex', gap: '8px', marginLeft: 'auto', marginRight: '16px' }}>
+          <button 
+            onClick={() => setActiveTab('enroll')} 
+            className={`btn ${activeTab === 'enroll' ? 'btn-secondary' : 'btn-outline'}`}
+            style={{ minHeight: 'auto', padding: '8px 16px', fontSize: '0.825rem' }}
+          >
+            <Layers className="w-4 h-4" />
+            Đăng ký học phần
+          </button>
+          <button 
+            onClick={() => setActiveTab('drl')} 
+            className={`btn ${activeTab === 'drl' ? 'btn-secondary' : 'btn-outline'}`}
+            style={{ minHeight: 'auto', padding: '8px 16px', fontSize: '0.825rem' }}
+          >
+            <Share2 className="w-4 h-4" />
+            Điểm rèn luyện
+          </button>
+          <button 
+            onClick={() => window.open('http://localhost:5001/api/export', '_blank')} 
+            className="btn btn-outline"
+            style={{ minHeight: 'auto', padding: '8px 16px', fontSize: '0.825rem' }}
+          >
+            <Download className="w-4 h-4" />
+            Xuất dữ liệu
+          </button>
+        </div>
+
         <div className="header-badges">
           <div className={`badge ${isTokenExpired ? 'badge-expired' : configExists ? 'badge-ready' : 'badge-pending'}`}>
             <span className="badge-dot pulse-indicator"></span>
@@ -922,6 +1076,51 @@ export default function App() {
                         placeholder="Không bắt buộc..." 
                         className="text-input" 
                       />
+                    </div>
+                  </div>
+                  
+                  <div className="grid-2" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px', marginTop: '4px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="input-label">Tài khoản Facebook (Email/SĐT)</label>
+                      <input 
+                        type="text" 
+                        value={fbUsername} 
+                        onChange={(e) => setFbUsername(e.target.value)} 
+                        placeholder="Để tự động login FB..." 
+                        className="text-input" 
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="input-label">Mật khẩu Facebook</label>
+                      <div style={{ position: 'relative' }}>
+                        <input 
+                          type={showFbPassword ? "text" : "password"} 
+                          value={fbPassword} 
+                          onChange={(e) => setFbPassword(e.target.value)} 
+                          placeholder="Để tự động login FB..." 
+                          className="text-input"
+                          style={{ paddingRight: '40px', width: '100%' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowFbPassword(!showFbPassword)}
+                          style={{
+                            position: 'absolute',
+                            right: '12px',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            color: 'rgba(255, 255, 255, 0.4)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          {showFbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div className="grid-3">
@@ -1463,6 +1662,352 @@ export default function App() {
         </div>
 
       </div>
+
+      {/* 📋 TABS VIEW: FACEBOOK SHARE DRL */}
+      {activeTab === 'drl' && (
+        <div className="col-flex" style={{ width: '100%', gap: '20px', marginTop: '10px', padding: '0 20px' }}>
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="card"
+            style={{ width: '100%', minHeight: '500px' }}
+          >
+            <div className="card-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 className="card-title cyan">
+                <Share2 className="w-5 h-5" />
+                Tự động Chia sẻ thông báo UTH & Lưu minh chứng (DRL)
+              </h2>
+              <button
+                onClick={fetchAnnouncements}
+                disabled={announcementsLoading || !configExists}
+                className="eye-button"
+                title="Tải lại danh sách thông báo"
+                style={{ padding: '8px' }}
+              >
+                <RefreshCw className={`w-4 h-4 ${announcementsLoading ? 'spin-loading' : ''}`} />
+              </button>
+            </div>
+
+            <div className="alert alert-info" style={{ marginBottom: '20px' }}>
+              <Info className="w-5 h-5 shrink-0 text-sky-400" />
+              <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
+                Hệ thống tự động quét danh sách thông báo tuyển sinh, sự kiện, học bổng từ cổng thông tin UTH. 
+                Bạn có thể bấm chia sẻ trực tiếp lên trang cá nhân Facebook để tích lũy Điểm rèn luyện (DRL), ảnh chụp màn hình sau khi share thành công sẽ được lưu trữ tự động trong folder <strong>"DRL"</strong>.
+              </div>
+            </div>
+
+            {(!config?.fb_username || editFbLogin) ? (
+              <div style={{ maxWidth: '440px', margin: '30px auto', width: '100%' }}>
+                <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#fff', marginBottom: '8px' }}>Cấu hình tài khoản Facebook</h3>
+                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                    Nhập tài khoản để bot tự động đăng nhập và chia sẻ bài viết lên dòng thời gian của bạn để tích lũy DRL.
+                  </p>
+                </div>
+                
+                <form onSubmit={handleSaveFacebookCredentials} style={{ display: 'flex', flexDirection: 'column', gap: '18px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', padding: '24px', borderRadius: '16px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Tài khoản Facebook (Email hoặc SĐT)</label>
+                    <input 
+                      type="text"
+                      value={fbUsername}
+                      onChange={(e) => setFbUsername(e.target.value)}
+                      placeholder="Nhập email hoặc số điện thoại..."
+                      className="text-input"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Mật khẩu Facebook</label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type={showFbPassword ? "text" : "password"}
+                        value={fbPassword}
+                        onChange={(e) => setFbPassword(e.target.value)}
+                        placeholder="Nhập mật khẩu Facebook..."
+                        className="text-input"
+                        style={{ paddingRight: '40px', width: '100%' }}
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowFbPassword(!showFbPassword)}
+                        style={{
+                          position: 'absolute',
+                          right: '12px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          color: 'rgba(255, 255, 255, 0.4)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}
+                      >
+                        {showFbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                    <button type="submit" className="btn btn-secondary" style={{ flex: 1, display: 'flex', justifyContent: 'center', fontSize: '0.85rem', fontWeight: '600' }}>
+                      XÁC NHẬN KẾT NỐI
+                    </button>
+                    {config?.fb_username && (
+                      <button 
+                        type="button" 
+                        onClick={() => setEditFbLogin(false)} 
+                        className="btn btn-outline" 
+                        style={{ width: 'auto', padding: '10px 16px', fontSize: '0.85rem' }}
+                      >
+                        HỦY
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+            ) : (
+              <>
+                {/* Linked Account Status Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(56, 189, 248, 0.04)', border: '1px solid rgba(56, 189, 248, 0.1)', padding: '10px 16px', borderRadius: '8px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.825rem' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Đang liên kết tài khoản Facebook:</span>
+                    <strong style={{ color: '#38bdf8' }}>{config?.fb_username}</strong>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setFbUsername(config?.fb_username || '');
+                      setFbPassword(config?.fb_password || '');
+                      setEditFbLogin(true);
+                    }}
+                    className="btn btn-outline"
+                    style={{ minHeight: 'auto', padding: '6px 14px', fontSize: '0.75rem', width: 'auto', borderColor: 'rgba(255,255,255,0.08)' }}
+                  >
+                    Thay đổi tài khoản
+                  </button>
+                </div>
+
+                {announcementsLoading ? (
+                  <div style={{ padding: '60px 0', textAlign: 'center', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                    Đang quét cổng thông tin trường UTH và đồng bộ danh sách sự kiện... Vui lòng đợi trong giây lát...
+                  </div>
+                ) : announcements.length > 0 ? (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="scan-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left', width: '8%' }}>ID</th>
+                          <th style={{ textAlign: 'left', width: '55%' }}>Tiêu đề sự kiện</th>
+                          <th style={{ textAlign: 'center', width: '15%' }}>Trạng thái</th>
+                          <th style={{ textAlign: 'center', width: '22%' }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {announcements.map((item, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                            <td style={{ fontWeight: 'bold', color: 'rgba(255,255,255,0.4)', padding: '14px 10px' }}>#{item.id}</td>
+                            <td style={{ color: 'var(--text-main)', fontWeight: '500', padding: '14px 10px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <span>{item.title}</span>
+                                <a 
+                                  href={item.link} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  style={{ color: '#38bdf8', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Xem liên kết cổng trường
+                                </a>
+                              </div>
+                            </td>
+                            <td style={{ textAlign: 'center', padding: '14px 10px' }}>
+                              {item.status === 'shared' ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '4px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                  <Check className="w-3.5 h-3.5" />
+                                  Đã chia sẻ
+                                </span>
+                              ) : (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255, 255, 255, 0.05)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '500' }}>
+                                  Chưa chia sẻ
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center', padding: '14px 10px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                                <button
+                                  onClick={() => handleShareFacebook(item.id, item.title)}
+                                  disabled={shareStatus === 'running'}
+                                  className="btn btn-outline"
+                                  style={{ 
+                                    padding: '6px 14px', 
+                                    fontSize: '0.75rem', 
+                                    minHeight: 'auto',
+                                    width: 'auto',
+                                    borderColor: 'rgba(56, 189, 248, 0.3)',
+                                    color: '#38bdf8',
+                                    background: 'rgba(56, 189, 248, 0.03)'
+                                  }}
+                                >
+                                  <Share2 className="w-3.5 h-3.5" />
+                                  Share FB
+                                </button>
+                                {item.status === 'shared' && item.screenshot && (
+                                  <a
+                                    href={item.screenshot}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="btn btn-outline"
+                                    style={{ 
+                                      padding: '6px 14px', 
+                                      fontSize: '0.75rem', 
+                                      minHeight: 'auto',
+                                      width: 'auto',
+                                      borderColor: 'rgba(168, 85, 247, 0.3)',
+                                      color: '#c084fc',
+                                      background: 'rgba(168, 85, 247, 0.03)',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      textDecoration: 'none'
+                                    }}
+                                  >
+                                    <Image className="w-3.5 h-3.5" />
+                                    Minh chứng
+                                  </a>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ padding: '60px 0', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-dark)', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+                    Không tìm thấy sự kiện nào trên cổng thông tin trường UTH.
+                  </div>
+                )}
+              </>
+            )}
+          </motion.div>
+        </div>
+      )}
+
+      {/* 🖥️ REAL-TIME SHARE OVERLAY MODAL */}
+      {showShareModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(5, 3, 15, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: '20px'
+        }}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            style={{
+              background: 'rgba(23, 20, 41, 0.95)',
+              border: '1px solid rgba(56, 189, 248, 0.2)',
+              borderRadius: '20px',
+              padding: '28px',
+              maxWidth: '520px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ 
+                width: '40px', 
+                height: '40px', 
+                borderRadius: '10px', 
+                background: 'rgba(14, 165, 233, 0.1)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Share2 className="w-5 h-5 text-sky-400" />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: '700', color: '#fff' }}>Tiến trình tự động đăng bài Facebook</h3>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Selenium Automation Runner</p>
+              </div>
+            </div>
+
+            {/* Step Display */}
+            <div style={{ 
+              background: 'rgba(0, 0, 0, 0.3)', 
+              border: '1px solid rgba(255,255,255,0.05)', 
+              borderRadius: '10px', 
+              padding: '20px',
+              minHeight: '120px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '12px',
+              textAlign: 'center',
+              marginBottom: '20px'
+            }}>
+              {shareStatus === 'running' && (
+                <div className="spin-loading" style={{ width: '28px', height: '28px', border: '3px solid rgba(56, 189, 248, 0.2)', borderTopColor: '#38bdf8', borderRadius: '50%' }} />
+              )}
+              {shareStatus === 'success' && (
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+              )}
+              {shareStatus === 'error' && (
+                <XCircle className="w-8 h-8 text-rose-400" />
+              )}
+              
+              <div style={{ 
+                fontSize: '0.9rem', 
+                fontWeight: '600', 
+                color: shareStatus === 'error' ? '#fb7185' : '#e2e8f0',
+                lineHeight: '1.5'
+              }}>
+                {shareStep || 'Đang chuẩn bị tiến trình...'}
+              </div>
+
+              {shareError && (
+                <div style={{ fontSize: '0.8rem', color: '#fda4af', marginTop: '4px', background: 'rgba(244,63,94,0.08)', padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(244,63,94,0.15)' }}>
+                  Lỗi: {shareError}
+                </div>
+              )}
+            </div>
+
+            {/* Instruction Guidance for user when waiting for FB login */}
+            {shareStep.includes('đăng nhập tài khoản Facebook') && (
+              <div className="alert alert-info" style={{ marginBottom: '20px', background: 'rgba(234, 179, 8, 0.1)', borderColor: 'rgba(234, 179, 8, 0.2)' }}>
+                <Info className="w-5 h-5 shrink-0 text-yellow-400" />
+                <div style={{ fontSize: '0.8rem', color: '#fef08a', lineHeight: '1.4' }}>
+                  <strong>LƯU Ý LẦN ĐẦU:</strong> Hãy nhìn xuống thanh Taskbar/Dock trên máy của bạn và bấm mở cửa sổ Chrome vừa hiện lên. Điền email/mật khẩu Facebook của bạn và đăng nhập. Sau khi bạn đăng nhập xong, bot sẽ tự phát hiện và hoàn thành nốt các bước còn lại!
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setShowShareModal(false)}
+                disabled={shareStatus === 'running'}
+                className="btn btn-outline"
+                style={{ width: 'auto', padding: '8px 20px', fontSize: '0.85rem' }}
+              >
+                Đóng cửa sổ
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* 🔐 SCREEN OVERLAY: LOGIN ON APP ENTRY */}
       {showLoginOverlay && (

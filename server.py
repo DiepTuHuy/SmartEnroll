@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, make_response
+from flask import Flask, jsonify, request, make_response, send_from_directory
 from flask_cors import CORS
 import json
 import os
@@ -79,430 +79,8 @@ def add_header(r):
     r.headers["Expires"] = "0"
     return r
 
-# Lưu config vào thư mục home của người dùng để tránh lỗi phân quyền (Read-only AppTranslocation) khi đóng gói trên macOS/Windows
-CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".smartenroll_config.json")
-
-class AppState:
-    def __init__(self):
-        self.is_spamming = False
-        self.spam_thread = None
-        self.logs = []
-        self.stats = {
-            "total_requests": 0,
-            "success_count": 0,
-            "error_count": 0
-        }
-        self.is_auto_configuring = False
-        self.auto_config_thread = None
-        self.auto_config_status = "idle"  # idle, running, success, failed
-        self.last_login_error = ""
-        self.session = requests.Session()
-        # Tăng kích thước Pool để tối ưu hóa kết nối song song và tái sử dụng Keep-Alive
-        adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=200, max_retries=1)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
-        self.config = None
-        self.load_config_data()
-        
-        # Bắt đầu luồng chạy ngầm tự động gia hạn token sau mỗi 10 phút
-        self.registered_classes_schedules = {}
-        threading.Thread(target=self.run_token_refresher_loop, daemon=True).start()
-
-    def load_config_data(self):
-        # Tự động di chuyển config.json cũ sang thư mục home nếu chưa di chuyển
-        if not os.path.exists(CONFIG_FILE) and os.path.exists("config.json"):
-            try:
-                import shutil
-                shutil.copy("config.json", CONFIG_FILE)
-                self.log(f"Đã tự động di chuyển config.json sang {CONFIG_FILE}")
-            except Exception as e:
-                self.log(f"Lỗi khi di chuyển config.json: {e}")
-
-        # Caching variables to keep token/cookie across manual/auto updates if not supplied
-        if not hasattr(self, '_token_cache'):
-            self._token_cache = None
-        if not hasattr(self, '_cookie_cache'):
-            self._cookie_cache = None
-        if not hasattr(self, '_ua_cache'):
-            self._ua_cache = None
-
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                    self.config = json.load(f)
-                    
-                    # Update caches if the loaded ones are present
-                    if self.config.get('token'):
-                        self._token_cache = self.config.get('token')
-                    if self.config.get('cookie'):
-                        self._cookie_cache = self.config.get('cookie')
-                    if self.config.get('user_agent'):
-                        self._ua_cache = self.config.get('user_agent')
-                        
-                    # Backfill empty fields from cache if present
-                    if not self.config.get('token') and self._token_cache:
-                        self.config['token'] = self._token_cache
-                    if not self.config.get('cookie') and self._cookie_cache:
-                        self.config['cookie'] = self._cookie_cache
-                    if not self.config.get('user_agent') and self._ua_cache:
-                        self.config['user_agent'] = self._ua_cache
-                        
-                    self.update_session_headers()
-                    
-                # Tự động gia hạn token ngay khi khởi động phần mềm nếu có tài khoản lưu trữ
-                if self.config and self.config.get("username") and self.config.get("password"):
-                    try:
-                        test_resp = self.session.get("https://portal.ut.edu.vn/api/v1/dkhp/getDot", timeout=3, verify=False)
-                        if test_resp.status_code == 401:
-                            self.log("🔄 Phát hiện token cũ đã hết hạn. Đang tự động đăng nhập lại...")
-                            self.login_with_credentials(self.config["username"], self.config["password"])
-                    except Exception as e:
-                        pass
-                return True
-            except Exception as e:
-                self.log(f"Lỗi đọc config.json: {e}")
-        self.config = None
-        return False
-
-    def run_token_refresher_loop(self):
-        while True:
-            # Chờ 10 phút (600 giây) trước mỗi lần gia hạn
-            time.sleep(600)
-            if self.config and self.config.get("username") and self.config.get("password"):
-                self.log("🔄 [Auto-Refresher] Đang tiến hành gia hạn tự động token cổng trường định kỳ (10 phút)...")
-                try:
-                    success = self.login_with_credentials(self.config["username"], self.config["password"])
-                    if success:
-                        self.log("✅ [Auto-Refresher] Tự động gia hạn token thành công!")
-                    else:
-                        self.log("❌ [Auto-Refresher] Tự động gia hạn token thất bại!")
-                except Exception as e:
-                    self.log(f"⚠️ [Auto-Refresher] Lỗi khi gia hạn token tự động: {e}")
-
-    def update_session_headers(self):
-        if self.config:
-            self.session.headers.update({
-                "Authorization": f"Bearer {self.config.get('token', '')}",
-                "Cookie": self.config.get('cookie', ''),
-                "User-Agent": self.config.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-            })
-
-    def login_with_credentials(self, username, password):
-        fake_captcha = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(32))
-        url = f"https://portal.ut.edu.vn/api/v1/user/login?g-recaptcha-response={fake_captcha}"
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Origin": "https://portal.ut.edu.vn",
-            "Referer": "https://portal.ut.edu.vn/login"
-        }
-        payload = {
-            "username": username,
-            "password": password
-        }
-        self.last_login_error = ""
-        try:
-            self.session.cookies.clear()
-            self.session.headers.clear()
-            resp = self.session.post(url, json=payload, headers=headers, timeout=10, verify=False)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success") and data.get("token"):
-                    token = data.get("token")
-                    cookie_str = "; ".join([f"{k}={v}" for k, v in self.session.cookies.items()])
-                    
-                    # Tự động lấy ID Đợt học mới nhất từ cổng trường ngay sau khi đăng nhập thành công
-                    dot_url = "https://portal.ut.edu.vn/api/v1/dkhp/getDot"
-                    dot_headers = {
-                        "Authorization": f"Bearer {token}",
-                        "Cookie": cookie_str,
-                        "User-Agent": headers["User-Agent"]
-                    }
-                    latest_dot = self.config.get("id_dot", "76") if self.config else "76"
-                    try:
-                        # Tạm thời gán headers cho session để gửi request
-                        self.session.headers.update(dot_headers)
-                        dot_resp = self.session.get(dot_url, timeout=5, verify=False)
-                        if dot_resp.status_code == 200:
-                            dot_data = dot_resp.json().get('data') or dot_resp.json().get('body') or []
-                            if dot_data:
-                                dot_ids = [str(d.get('id') or d.get('idDot')) for d in dot_data if d.get('id') or d.get('idDot')]
-                                if dot_ids:
-                                    latest_dot = dot_ids[0]
-                                    self.log(f"📅 Tự động quét và cấu hình ID Đợt học mới nhất: {latest_dot}")
-                    except Exception as e:
-                        self.log(f"⚠️ Không thể tự động quét đợt học sau đăng nhập: {e}")
-
-                    self.config = {
-                        "api_url": "https://portal.ut.edu.vn/coursesregistration",
-                        "token": token,
-                        "cookie": cookie_str,
-                        "id_dot": latest_dot,
-                        "user_agent": headers["User-Agent"],
-                        "username": username,
-                        "password": password
-                    }
-                    
-                    # Update cache values
-                    self._token_cache = token
-                    self._cookie_cache = cookie_str
-                    
-                    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                        json.dump(self.config, f, indent=4)
-                    self.update_session_headers()
-                    self.log(f"🔑 Đăng nhập thành công tài khoản: {username}!")
-                    return True
-                else:
-                    self.last_login_error = data.get('message', 'Sai tài khoản hoặc mật khẩu!')
-                    self.log(f"❌ Đăng nhập thất bại: {self.last_login_error}")
-            else:
-                self.last_login_error = f"Portal trả về mã {resp.status_code}"
-                self.log(f"❌ Đăng nhập thất bại, mã lỗi: {resp.status_code}")
-        except Exception as e:
-            self.last_login_error = f"Không thể kết nối cổng trường: {e}"
-            self.log(f"❌ Lỗi kết nối cổng trường: {e}")
-        return False
-
-    def request_with_retry(self, method, url, **kwargs):
-        try:
-            resp = self.session.request(method, url, **kwargs)
-            if resp.status_code == 401:
-                if self.config and self.config.get("username") and self.config.get("password"):
-                    self.log("🔄 Token hết hạn (401). Đang tiến hành gia hạn tự động...")
-                    if self.login_with_credentials(self.config["username"], self.config["password"]):
-                        if "headers" in kwargs and "Authorization" in kwargs["headers"]:
-                            kwargs["headers"]["Authorization"] = f"Bearer {self.config['token']}"
-                        resp = self.session.request(method, url, **kwargs)
-            return resp
-        except Exception as e:
-            raise e
-
-    def log(self, message):
-        timestamp = time.strftime("%H:%M:%S")
-        log_entry = f"[{timestamp}] {message}"
-        print(log_entry)
-        self.logs.append(log_entry)
-        if len(self.logs) > 300:
-            self.logs.pop(0)
-
-    def run_auto_config_bg(self):
-        self.is_auto_configuring = True
-        self.auto_config_status = "running"
-        self.log("🚀 Đang khởi động auto_config qua Chrome...")
-        
-        try:
-            res = get_auto_config()
-            if res:
-                self.auto_config_status = "success"
-                self.log("✅ Lấy Token & ID đợt đăng ký thành công!")
-                self.load_config_data()
-            else:
-                self.auto_config_status = "failed"
-                self.log("❌ Lấy cấu hình thất bại (Trình duyệt đóng hoặc hết thời gian).")
-        except Exception as e:
-            self.auto_config_status = "failed"
-            self.log(f"❌ Lỗi khi chạy auto config: {e}")
-        finally:
-            self.is_auto_configuring = False
-
-    def fetch_class_detail(self, class_id, is_conditional=False):
-        if is_conditional:
-            url = "https://portal.ut.edu.vn/api/v1/dkhpdk/getLopHocPhanDetail"
-        else:
-            url = "https://portal.ut.edu.vn/api/v1/dkhp/getLopHocPhanDetail"
-        params = {"idLopHocPhan": class_id}
-        for _ in range(3):
-            try:
-                resp = self.request_with_retry("GET", url, params=params, timeout=5)
-                if resp.status_code == 200:
-                    return resp.json().get('body') or []
-                time.sleep(0.1)
-            except Exception:
-                pass
-        return None
-
-    def format_schedule(self, details):
-        if not details:
-            return "⚠️ Không lấy được lịch"
-        parts = []
-        for d in details:
-            raw_thu = str(d.get('thu', ''))
-            thu_text = "Chủ Nhật" if raw_thu in ['8', 'CN', 'Chủ Nhật'] else f"Thứ {raw_thu}"
-            tiet = d.get('tietHoc', '?')
-            phong = d.get('phong') or d.get('tenPhong') or ""
-            phong_text = f" - P.{phong}" if phong else ""
-            parts.append(f"{thu_text} (Tiết {tiet}){phong_text}")
-        return " | ".join(parts)
-
-    def parse_periods(self, tiet_str):
-        periods = set()
-        if not tiet_str:
-            return periods
-        tiet_str = str(tiet_str)
-        parts = tiet_str.split(',')
-        for part in parts:
-            part = part.strip()
-            if '-' in part:
-                try:
-                    start, end = map(int, part.split('-'))
-                    periods.update(range(start, end + 1))
-                except Exception:
-                    pass
-            else:
-                try:
-                    periods.add(int(part))
-                except Exception:
-                    pass
-        return periods
-
-    def get_conflict_details(self, details_a):
-        # Checks if details_a (scanned class) conflicts with any registered classes
-        # Returns a dict: {"conflicting": True, "conflict_with": "Môn B [Lớp Y]"} or {"conflicting": False}
-        if not details_a or not self.registered_classes_schedules:
-            return {"conflicting": False}
-            
-        for sa in details_a:
-            thu_a = str(sa.get("thu", ""))
-            periods_a = self.parse_periods(sa.get("tietHoc", ""))
-            if not thu_a or not periods_a:
-                continue
-                
-            for rc_id, info in self.registered_classes_schedules.items():
-                rc_name = info.get("name", "Môn học đã đăng ký")
-                rc_code = info.get("code", "")
-                rc_schedules = info.get("schedules", [])
-                
-                for sb in rc_schedules:
-                    thu_b = str(sb.get("thu", ""))
-                    periods_b = self.parse_periods(sb.get("tietHoc", ""))
-                    if not thu_b or not periods_b:
-                        continue
-                        
-                    if thu_a == thu_b:
-                        if periods_a.intersection(periods_b):
-                            return {
-                                "conflicting": True,
-                                "conflict_with": f"{rc_name} (Lớp {rc_code})"
-                            }
-        return {"conflicting": False}
-
-    def check_filter(self, details, target_thu, target_ca):
-        if not details:
-            return False
-        if target_thu == "Tất cả" and target_ca == "Tất cả":
-            return True
-        for d in details:
-            raw_thu = str(d.get('thu', ''))
-            is_cn = raw_thu in ['8', 'CN', 'Chủ Nhật']
-            current_thu = "Chủ nhật" if is_cn else f"Thứ {raw_thu}"
-            
-            match_thu = (target_thu == "Tất cả") or (target_thu.lower() == current_thu.lower())
-            match_ca = (target_ca == "Tất cả")
-            
-            if target_ca != "Tất cả":
-                tiet_str = d.get('tietHoc', '')
-                t_s, t_e = CA_HOC[target_ca][0], CA_HOC[target_ca][-1]
-                if f"{t_s}-{t_e}" in tiet_str or f"{t_s},{t_e}" in tiet_str:
-                    match_ca = True
-                else:
-                    try:
-                        if '-' in tiet_str:
-                            start, end = map(int, tiet_str.split('-'))
-                            if t_s <= start <= t_e:
-                                match_ca = True
-                    except Exception:
-                        pass
-            if match_thu and match_ca:
-                return True
-        return False
-
-    def run_spam_loop(self, targets, mode="normal"):
-        self.is_spamming = True
-        self.stats = {"total_requests": 0, "success_count": 0, "error_count": 0}
-        self.log(f"🔥 Bắt đầu chiến dịch Spam {len(targets)} lớp ở chế độ {mode.upper()}...")
-
-        import concurrent.futures
-
-        def register_class(t):
-            if not self.is_spamming:
-                return None
-            try:
-                is_cond = t.get('is_conditional', False)
-                if is_cond:
-                    url = "https://portal.ut.edu.vn/api/v1/dkhpdk/dangKyLopHocPhan"
-                else:
-                    url = "https://portal.ut.edu.vn/api/v1/dkhp/dangKyLopHocPhan"
-                    
-                params = {
-                    "idLopHocPhan": str(t['id']),
-                    "g-recaptcha-response": ""
-                }
-                resp = self.request_with_retry("POST", url, params=params, timeout=5)
-                self.stats["total_requests"] += 1
-                
-                if resp.status_code == 200:
-                    d = resp.json()
-                    msg = d.get("message", "")
-                    if d.get("success"):
-                        self.log(f"🎉 ĐĂNG KÝ THÀNH CÔNG: {t['name']} (ID: {t['id']})")
-                        self.stats["success_count"] += 1
-                        return {"status": "success", "target": t}
-                    elif "đã đăng ký" in msg or "Trùng lịch học" in msg:
-                        self.log(f"ℹ️ {t['name']}: {msg}")
-                        self.stats["success_count"] += 1
-                        return {"status": "already", "target": t}
-                    else:
-                        self.log(f"⚠️ {t['name']}: {msg}")
-                        self.stats["error_count"] += 1
-                        return {"status": "failed", "target": t}
-                elif resp.status_code == 401:
-                    self.log("💀 Token hết hạn! Vui lòng đăng nhập lại.")
-                    self.is_spamming = False
-                    return {"status": "expired", "target": t}
-                else:
-                    self.log(f"🔥 Lỗi HTTP {resp.status_code} khi đăng ký {t['name']}")
-                    self.stats["error_count"] += 1
-                    return {"status": "failed", "target": t}
-            except Exception as e:
-                self.log(f"❌ Lỗi mạng khi đăng ký {t['name']}: {e}")
-                self.stats["error_count"] += 1
-                return {"status": "failed", "target": t}
-
-        while self.is_spamming and targets:
-            next_round = []
-            
-            if mode == "turbo":
-                # TURBO MODE: Spam concurrently using ThreadPool
-                max_workers = min(len(targets) * 2, 12)
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {executor.submit(register_class, t): t for t in targets}
-                    for future in concurrent.futures.as_completed(futures):
-                        res = future.result()
-                        if res and res["status"] == "failed":
-                            next_round.append(res["target"])
-                
-                if self.is_spamming and next_round:
-                    time.sleep(0.1) # Tiny sleep to avoid CPU lockup but stay ultra-fast
-            else:
-                # NORMAL MODE: Sequential, 0.5s delay
-                for t in targets:
-                    if not self.is_spamming:
-                        break
-                    res = register_class(t)
-                    if res and res["status"] == "failed":
-                        next_round.append(res["target"])
-                    time.sleep(0.5)
-                
-                if self.is_spamming and next_round:
-                    time.sleep(1.0)
-
-            targets = next_round
-
-        self.log("⏹ Đã dừng Spam.")
-        self.is_spamming = False
-
-state = AppState()
+from core_state import get_app_state
+state = get_app_state('web_default')
 
 # Vô hiệu hóa bộ nhớ đệm (Cache) của trình duyệt đối với các API
 @app.after_request
@@ -535,7 +113,9 @@ def save_config_manual():
         "id_dot": data.get("id_dot", "").strip(),
         "user_agent": data.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
         "username": data.get("username", "").strip(),
-        "password": data.get("password", "").strip()
+        "password": data.get("password", "").strip(),
+        "fb_username": data.get("fb_username", "").strip(),
+        "fb_password": data.get("fb_password", "").strip()
     }
     
     try:
@@ -843,6 +423,229 @@ def get_spam_status():
         "stats": state.stats,
         "logs": state.logs[-50:]  # Return last 50 logs to frontend
     })
+
+# --- FACEBOOK SHARE DRL ROUTES ---
+
+# Global state for Facebook sharing process
+share_process = {
+    "status": "idle", # idle, running, success, error
+    "step": "",
+    "error": None
+}
+
+def run_fb_share_async(event_id, title):
+    global share_process
+    import subprocess
+    
+    python_exe = sys.executable or "python"
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "facebook_share.py")
+    
+    try:
+        process = subprocess.Popen(
+            [python_exe, script_path, str(event_id), title],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        
+        for line in iter(process.stdout.readline, ""):
+            line = line.strip()
+            print(f"[facebook_share output] {line}")
+            if line.startswith("[STATUS]"):
+                status_val = line.replace("[STATUS]", "").strip()
+                if status_val.startswith("ERROR:"):
+                    share_process["status"] = "error"
+                    share_process["error"] = status_val.replace("ERROR:", "").strip()
+                    share_process["step"] = ""
+                elif status_val.startswith("SUCCESS:"):
+                    filename = status_val.replace("SUCCESS:", "").strip()
+                    share_process["status"] = "success"
+                    share_process["step"] = f"Hoàn thành! Đã lưu minh chứng: {filename}"
+                    share_process["error"] = None
+                else:
+                    steps_map = {
+                        "STARTING_CHROME": "Đang khởi động trình duyệt Chrome...",
+                        "LOGGING_IN_PORTAL": "Đang đăng nhập Cổng thông tin UTH...",
+                        "LOADING_PORTAL_EVENT": "Đang ghi nhận sự kiện trên Portal...",
+                        "NAVIGATING_FACEBOOK": "Đang kết nối Facebook...",
+                        "LOGGING_IN_FB": "Đang điền thông tin và tự động đăng nhập Facebook...",
+                        "WAITING_FB_REDIRECT": "Đang đợi Facebook chuyển hướng sau đăng nhập...",
+                        "CHECKING_FB_LOGIN": "Đang kiểm tra đăng nhập Facebook...",
+                        "WAITING_FB_LOGIN": "⚠️ Đang đợi bạn đăng nhập tài khoản Facebook trên trình duyệt Chrome vừa mở...",
+                        "SEARCHING_FB": "Đang tìm kiếm bài viết sự kiện trên Facebook...",
+                        "FINDING_POST": "Đang phân tích kết quả tìm kiếm...",
+                        "SHARING_POST": "Đang nhấp nút Chia sẻ bài viết...",
+                        "CONFIRMING_SHARE": "Đang xác nhận chia sẻ lên trang cá nhân...",
+                        "TAKING_SCREENSHOT": "Đang chụp ảnh màn hình lưu minh chứng..."
+                    }
+                    share_process["status"] = "running"
+                    share_process["step"] = steps_map.get(status_val, status_val)
+                    
+        process.stdout.close()
+        process.wait()
+        
+        if process.returncode != 0 and share_process["status"] == "running":
+            share_process["status"] = "error"
+            share_process["error"] = f"Tiến trình bị gián đoạn với mã thoát {process.returncode}"
+            
+    except Exception as e:
+        share_process["status"] = "error"
+        share_process["error"] = str(e)
+
+@app.route('/api/announcements', methods=['GET'])
+def get_announcements():
+    if not state.config:
+        return jsonify({"success": False, "message": "Cấu hình chưa được tải!"}), 400
+        
+    username = state.config.get("username")
+    password = state.config.get("password")
+    
+    if not username or not password:
+        return jsonify({"success": False, "message": "Tài khoản/Mật khẩu trống!"}), 400
+        
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1200,800")
+    
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=options)
+        driver.get("https://portal.ut.edu.vn/")
+        time.sleep(3)
+        
+        if "/login" in driver.current_url or len(driver.find_elements(By.TAG_NAME, "input")) > 0:
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            for inp in inputs:
+                type_attr = inp.get_attribute("type")
+                placeholder = inp.get_attribute("placeholder") or ""
+                if type_attr == "text" or "sinh viên" in placeholder.lower() or "mssv" in placeholder.lower() or "tài khoản" in placeholder.lower():
+                    inp.clear()
+                    inp.send_keys(username)
+                elif type_attr == "password" or "mật khẩu" in placeholder.lower():
+                    inp.clear()
+                    inp.send_keys(password)
+            
+            time.sleep(0.5)
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            clicked = False
+            for b in buttons:
+                b_text = b.text.strip()
+                if "Đăng nhập" in b_text or "ĐĂNG NHẬP" in b_text:
+                    b.click()
+                    clicked = True
+                    break
+            if not clicked:
+                for b in buttons:
+                    if b.get_attribute("type") == "submit" or "dang nhap" in b.text.lower():
+                        b.click()
+                        break
+            time.sleep(5)
+            
+        driver.get("https://portal.ut.edu.vn/notedetail")
+        time.sleep(3)
+        
+        links = driver.find_elements(By.TAG_NAME, "a")
+        events = []
+        drl_folder = os.path.join(os.getcwd(), "DRL")
+        os.makedirs(drl_folder, exist_ok=True)
+        
+        for l in links:
+            href = l.get_attribute("href") or ""
+            text = l.text.strip()
+            if "/event/" in href and text:
+                event_id = href.split("/event/")[-1]
+                
+                shared_status = "not_shared"
+                screenshot_file = None
+                for fname in os.listdir(drl_folder):
+                    if fname.startswith(f"share_event_{event_id}_") and fname.endswith(".png"):
+                        shared_status = "shared"
+                        screenshot_file = fname
+                        break
+                        
+                events.append({
+                    "id": event_id,
+                    "title": text,
+                    "link": href,
+                    "status": shared_status,
+                    "screenshot": f"/drl/{screenshot_file}" if screenshot_file else None
+                })
+        
+        seen = set()
+        unique_events = []
+        for e in events:
+            if e["id"] not in seen:
+                seen.add(e["id"])
+                unique_events.append(e)
+                
+        return jsonify({"success": True, "data": unique_events})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Lỗi cào thông báo: {str(e)}"}), 500
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+@app.route('/api/share/facebook', methods=['POST'])
+def share_facebook():
+    global share_process
+    if share_process["status"] == "running":
+        return jsonify({"success": False, "message": "Có một tiến trình chia sẻ đang chạy!"}), 400
+        
+    data = request.json
+    event_id = data.get("eventId")
+    title = data.get("title", "")
+    
+    if not event_id:
+        return jsonify({"success": False, "message": "Thiếu ID sự kiện!"}), 400
+        
+    share_process = {
+        "status": "running",
+        "step": "Đang chuẩn bị tiến trình...",
+        "error": None
+    }
+    
+    threading.Thread(target=run_fb_share_async, args=(event_id, title), daemon=True).start()
+    return jsonify({"success": True, "message": "Đã bắt đầu tiến trình chia sẻ Facebook!"})
+
+@app.route('/api/share/status', methods=['GET'])
+def get_share_status():
+    global share_process
+    return jsonify(share_process)
+
+@app.route('/drl/<path:filename>')
+def serve_drl_file(filename):
+    drl_folder = os.path.join(os.getcwd(), "DRL")
+    return send_from_directory(drl_folder, filename)
+
+@app.route('/api/export', methods=['GET'])
+def export_study_data():
+    if not state.config:
+        return jsonify({"success": False, "message": "Chưa đăng nhập!"}), 401
+    try:
+        from export_json import build_export_data
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        data = loop.run_until_complete(build_export_data(state))
+        import json
+        response = app.response_class(
+            response=json.dumps(data, ensure_ascii=False, indent=4),
+            status=200,
+            mimetype='application/json'
+        )
+        response.headers["Content-Disposition"] = "attachment; filename=DuLieuHocTap.json"
+        return response
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5001))

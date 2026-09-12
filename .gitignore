@@ -8,3 +8,11 @@ build/
 dist/
 *.spec
 
+
+.env
+venv/
+.chrome_profile_std/
+scratch/
+DRL/
+export_test.json
+.smartenroll_config_*.json
