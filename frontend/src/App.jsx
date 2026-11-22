@@ -160,6 +160,7 @@ export default function App() {
   // Course & Class scanning states
   const [courses, setCourses] = useState([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
+  const [coursesError, setCoursesError] = useState(''); // shown inline under the course picker
   const [selectedCourse, setSelectedCourse] = useState('');
   const [courseSearch, setCourseSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -480,18 +481,21 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setCourses(data.data || []);
+        setCoursesError('');
         setIsTokenExpired(false);
         resetSessionTimer();
       } else {
+        setCourses([]);
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
-          setCourses([]);
         } else {
-          await alert("Lỗi tải môn học: " + data.message);
+          // inline instead of a modal: e.g. 403 outside the registration window is expected, not an emergency
+          setCoursesError(data.message || 'Không tải được danh sách môn.');
         }
       }
     } catch (err) {
       console.error(err);
+      setCoursesError('Không kết nối được server SmartEnroll trên máy này.');
     } finally {
       setCoursesLoading(false);
     }
@@ -1252,6 +1256,7 @@ export default function App() {
                       </span>
                       <ChevronDown size={16} />
                     </button>
+                    {coursesError && !dropdownOpen && <div className="field-note error">{coursesError}</div>}
 
                     <AnimatePresence>
                     {dropdownOpen && (
@@ -1271,6 +1276,8 @@ export default function App() {
                             <div className="menu-empty">Đang tải danh sách môn…</div>
                           ) : isTokenExpired ? (
                             <div className="menu-empty error">Phiên đăng nhập hết hạn. Hãy đăng nhập lại.</div>
+                          ) : coursesError && courses.length === 0 ? (
+                            <div className="menu-empty error">{coursesError}</div>
                           ) : filteredCourses.length > 0 ? (
                             filteredCourses.map((c, index) => (
                               <button

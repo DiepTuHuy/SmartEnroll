@@ -16,3 +16,6 @@ scratch/
 DRL/
 export_test.json
 .smartenroll_config_*.json
+
+# load test results
+tests/output/

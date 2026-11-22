@@ -99,6 +99,34 @@ def add_header(r):
 from core_state import get_app_state
 state = get_app_state('web_default')
 
+PORTAL_STATUS_HINTS = {
+    403: "cổng trường từ chối truy cập. Hay gặp khi đợt đăng ký chưa mở hoặc đã đóng, đợt này không dành cho bạn, "
+         "hoặc bị chặn tạm thời vì gửi quá nhiều request",
+    404: "không tìm thấy dữ liệu (có thể sai ID đợt học)",
+    429: "cổng trường báo gửi quá nhiều request, hãy chờ một lúc rồi thử lại",
+}
+
+def portal_error_response(resp, prefix):
+    """Báo lỗi kèm NGUYÊN VĂN lời cổng trường. Bản cũ chỉ ghi "mã 403", không cho biết vì sao bị từ chối."""
+    detail = ""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            detail = str(body.get("message") or body.get("error") or body.get("title") or "")
+    except ValueError:
+        text = (resp.text or "").strip()
+        if text and not text.startswith("<"):
+            detail = text[:200]
+    code = resp.status_code
+    message = f"{prefix} (mã {code})"
+    if detail:
+        message += f": {detail}"
+    elif code in PORTAL_STATUS_HINTS:
+        message += f": {PORTAL_STATUS_HINTS[code]}"
+    endpoint = resp.url.split("?")[0].replace("https://portal.ut.edu.vn", "")
+    state.log(f"⚠️ {message} [{endpoint}]")
+    return jsonify({"success": False, "message": message, "status": code}), code
+
 # Vô hiệu hóa bộ nhớ đệm (Cache) của trình duyệt đối với các API
 @app.after_request
 def add_header(response):
@@ -241,7 +269,7 @@ def get_courses():
         elif resp.status_code == 401:
             return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
         else:
-            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
+            return portal_error_response(resp, "Không tải được danh sách môn")
     except Exception as e:
         return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
 
@@ -264,7 +292,7 @@ def get_dots():
         elif resp.status_code == 401:
             return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
         else:
-            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
+            return portal_error_response(resp, "Không tải được danh sách đợt")
     except Exception as e:
         return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
 
@@ -369,7 +397,7 @@ def deregister_class():
         elif resp.status_code == 401:
             return jsonify({"success": False, "message": "Token hết hạn!", "expired": True}), 401
         else:
-            return jsonify({"success": False, "message": f"Portal trả về mã {resp.status_code}"}), resp.status_code
+            return portal_error_response(resp, "Không hủy được đăng ký")
     except Exception as e:
         return jsonify({"success": False, "message": f"Lỗi kết nối portal: {e}"}), 500
 
@@ -403,7 +431,7 @@ def get_classes():
     try:
         resp = state.request_with_retry("GET", url_list, params=params, timeout=10)
         if resp.status_code != 200:
-            return jsonify({"success": False, "message": f"Không thể lấy danh sách lớp, mã {resp.status_code}"}), resp.status_code
+            return portal_error_response(resp, "Không lấy được danh sách lớp")
         
         classes = resp.json().get('data') or resp.json().get('body') or []
         filtered_classes = []

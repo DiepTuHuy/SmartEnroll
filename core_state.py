@@ -1,6 +1,10 @@
 import os
 import json
 import base64
+import heapq
+import itertools
+import weakref
+import concurrent.futures
 import threading
 import time
 import random
@@ -44,6 +48,10 @@ RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
 # Giới hạn số request đăng ký đang bay cùng lúc (tránh bị chặn IP vì "flood").
 MAX_INFLIGHT_REGISTER = 12
 TURBO_LANES_PER_CLASS = 3
+# Số request đăng ký được chờ cùng lúc cho CẢ tiến trình (mọi tài khoản cộng lại). Một máy một sinh viên
+# không bao giờ chạm tới; chỉ có tác dụng khi Discord bot phục vụ rất nhiều người trong cùng một tiến trình.
+SPAM_MAX_WORKERS = int(os.environ.get("SMARTENROLL_SPAM_WORKERS", "256"))
+KEEPALIVE_TICK = 30
 
 # Token cổng trường là JWT sống 30 ngày -> chỉ gia hạn khi còn dưới 1 giờ.
 TOKEN_REFRESH_MARGIN = 3600
@@ -134,16 +142,24 @@ def _describe_exception(exc):
     return "error", f"Lỗi mạng: {exc}"
 
 
-def _sleep_unless_stopped(delay, should_continue=None):
-    """Ngủ `delay` giây nhưng thức dậy ngay khi should_continue() trả về False."""
-    end = time.time() + max(0.0, delay)
+def _sleep_unless_stopped(delay, should_continue=None, wake_event=None):
+    """Ngủ `delay` giây; dừng sớm khi should_continue() trả về False.
+
+    Có wake_event thì chờ thẳng trên Event (không thức dậy định kỳ). Bản cũ thức 10 lần/giây
+    để kiểm tra; nhân với vài nghìn luồng khi chạy nhiều tài khoản là đủ làm tiến trình nghẽn GIL.
+    """
+    end = time.monotonic() + max(0.0, delay)
     while True:
         if should_continue is not None and not should_continue():
             return False
-        remaining = end - time.time()
+        remaining = end - time.monotonic()
         if remaining <= 0:
             return True
-        time.sleep(min(0.1, remaining))
+        if wake_event is not None:
+            if wake_event.wait(remaining):
+                return bool(should_continue()) if should_continue is not None else False
+        else:
+            time.sleep(min(0.25, remaining))
 
 
 def _new_http_session():
@@ -153,6 +169,223 @@ def _new_http_session():
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+# ---------------------------------------------------------------- shared engine
+# Dùng chung cho mọi tài khoản trong tiến trình, để số luồng KHÔNG tăng theo số tài khoản.
+
+# Việc nền nhỏ: kiểm tra token lúc khởi động, cập nhật đợt học, heartbeat.
+_background = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="smartenroll-bg")
+
+
+class _SpamScheduler:
+    """Một luồng hẹn giờ + một nhóm luồng làm việc, dùng chung cho mọi chiến dịch spam.
+
+    Mỗi 'làn' đăng ký là một việc nhỏ: gửi đúng 1 request rồi tự hẹn lần chạy kế tiếp.
+    Trong lúc chờ tới lượt, làn không giữ luồng nào và không tốn CPU.
+    """
+
+    def __init__(self, workers):
+        self._heap = []
+        self._cv = threading.Condition()
+        self._seq = itertools.count()
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="smartenroll-spam")
+        threading.Thread(target=self._dispatch, name="smartenroll-spam-scheduler", daemon=True).start()
+
+    def call_later(self, delay, fn):
+        when = time.monotonic() + max(0.0, delay)
+        with self._cv:
+            heapq.heappush(self._heap, (when, next(self._seq), fn))
+            self._cv.notify()
+
+    def _dispatch(self):
+        while True:
+            with self._cv:
+                while True:
+                    if not self._heap:
+                        self._cv.wait()
+                        continue
+                    delay = self._heap[0][0] - time.monotonic()
+                    if delay <= 0:
+                        fn = heapq.heappop(self._heap)[2]
+                        break
+                    self._cv.wait(delay)
+            self._pool.submit(fn)
+
+
+_scheduler_instance = None
+_scheduler_guard = threading.Lock()
+
+
+def _spam_scheduler():
+    global _scheduler_instance
+    if _scheduler_instance is None:
+        with _scheduler_guard:
+            if _scheduler_instance is None:
+                _scheduler_instance = _SpamScheduler(SPAM_MAX_WORKERS)
+    return _scheduler_instance
+
+
+# Một luồng giữ phiên cho mọi tài khoản (bản cũ: mỗi tài khoản một luồng ngủ/thức riêng).
+_live_states = weakref.WeakSet()
+_keepalive_started = False
+_keepalive_guard = threading.Lock()
+
+
+def _start_keepalive():
+    global _keepalive_started
+    with _keepalive_guard:
+        if _keepalive_started:
+            return
+        _keepalive_started = True
+    threading.Thread(target=_keepalive_loop, name="smartenroll-keepalive", daemon=True).start()
+
+
+def _keepalive_loop():
+    while True:
+        time.sleep(KEEPALIVE_TICK)
+        for state in list(_live_states):
+            if not state._keepalive_busy:
+                state._keepalive_busy = True
+                _background.submit(state._safe_keepalive_tick)
+
+
+class _SpamRun:
+    """Một chiến dịch spam (một lần bấm "Chạy")."""
+
+    def __init__(self, state, run_id, turbo):
+        self.state = state
+        self.run_id = run_id
+        self.turbo = turbo
+        self.stats = {"total_requests": 0, "success_count": 0, "error_count": 0, "timeouts": 0, "relogins": 0}
+        self.stop_event = threading.Event()   # đã bấm dừng / bị hủy
+        self.finished = threading.Event()     # đã dừng, hoặc mọi làn đã xong
+        self.inflight = threading.Semaphore(MAX_INFLIGHT_REGISTER)
+        self.lanes_left = 0
+        self.aborted = False
+        self._lock = threading.Lock()
+
+    def active(self):
+        return not self.stop_event.is_set()
+
+    def stop(self):
+        self.stop_event.set()
+        self.finished.set()
+
+    def lane_finished(self):
+        with self._lock:
+            self.lanes_left -= 1
+            if self.lanes_left <= 0:
+                self.finished.set()
+
+
+class _SpamLane:
+    """Một 'làn' gửi request cho 1 lớp: mỗi lần chạy gửi đúng 1 request rồi tự hẹn lần kế tiếp."""
+
+    def __init__(self, run, target, done):
+        self.run = run
+        self.target = target
+        self.done = done              # dùng chung giữa các làn của cùng một lớp
+        self.fail_streak = 0
+        self.seen_gen = None
+        self.waiting_relogin = False
+        self.ended = False
+
+    def active(self):
+        return self.run.active() and not self.done.is_set()
+
+    def schedule(self, delay):
+        _spam_scheduler().call_later(delay, self.step)
+
+    def finish(self):
+        if not self.ended:
+            self.ended = True
+            self.run.lane_finished()
+
+    def step(self):
+        try:
+            self._step()
+        except Exception as e:  # một lỗi lạ không được giết chết làn
+            self.run.state.log(f"⚠️ Lỗi không mong đợi ở làn đăng ký: {e}")
+            if self.active():
+                self.schedule(1.0)
+            else:
+                self.finish()
+
+    def _step(self):
+        run, state, t = self.run, self.run.state, self.target
+        name = t.get('name') or t.get('id')
+        target_id = t.get('id')
+        if not self.active():
+            return self.finish()
+
+        if self.waiting_relogin:
+            if state._token_gen != self.seen_gen:
+                self.waiting_relogin = False
+                state._bump(run.stats, "relogins")
+            elif run.aborted:
+                return self.finish()
+            else:
+                return self.schedule(0.3)
+
+        # Giới hạn số request đang bay của tài khoản này; không chặn luồng làm việc, chỉ hẹn lại.
+        if not run.inflight.acquire(blocking=False):
+            return self.schedule(0.05)
+        self.seen_gen = state._token_gen
+        try:
+            outcome, msg, retry_after = state._register_once(t)
+        except Exception as e:
+            outcome, msg, retry_after = "overloaded", f"Lỗi không mong đợi: {e}", None
+        finally:
+            run.inflight.release()
+        state._bump(run.stats, "total_requests")
+
+        if outcome in ("success", "already"):
+            # Kết quả thành công vẫn được ghi nhận kể cả khi người dùng vừa bấm dừng.
+            with state._stats_lock:
+                first = not self.done.is_set()
+                self.done.set()
+            if first:
+                state._bump(run.stats, "success_count")
+                if outcome == "success":
+                    state.log(f"🎉 ĐĂNG KÝ THÀNH CÔNG: {name} (ID: {target_id})")
+                else:
+                    state.log(f"ℹ️ {name}: {msg}")
+            return self.finish()
+
+        if not self.active():
+            return self.finish()
+
+        if outcome == "expired":
+            state._log_deduped(run.run_id, target_id, f"🔑 {name}: token hết hạn, đang tự đăng nhập lại...")
+            status = state._begin_spam_relogin(self.seen_gen, run)
+            if status == "ready":
+                state._bump(run.stats, "relogins")
+                return self.schedule(0)
+            if status == "no_credentials":
+                state._abort_run(run, f"💀 Không tự đăng nhập lại được ({state.last_login_error}). "
+                                      "Dừng spam, vui lòng đăng nhập lại.")
+                return self.finish()
+            self.waiting_relogin = True
+            return self.schedule(0.3)
+
+        state._bump(run.stats, "error_count")
+        if outcome == "rejected":
+            # Server trả lời bình thường nhưng chưa cho đăng ký (lớp đầy, chưa tới giờ...).
+            self.fail_streak = 0
+            state._log_deduped(run.run_id, target_id, f"⚠️ {name}: {msg}")
+            delay = random.uniform(0.25, 0.5) if run.turbo else random.uniform(0.8, 1.2)
+        elif outcome == "timeout":
+            # Đã chờ hết timeout rồi: gửi lại gần như ngay để giữ chỗ trong hàng đợi.
+            state._bump(run.stats, "timeouts")
+            state._log_deduped(run.run_id, target_id, f"⏳ {name}: {msg}")
+            delay = random.uniform(0.05, 0.3)
+        else:
+            # Server trả lỗi nhanh (502/503/429...): lùi dần để không bị chặn IP.
+            self.fail_streak += 1
+            state._log_deduped(run.run_id, target_id, f"🔥 {name}: {msg}")
+            delay = retry_after or _backoff(self.fail_streak, base=0.4, cap=2.0 if run.turbo else 4.0)
+        return self.schedule(delay)
 
 
 _app_states = {}
@@ -171,7 +404,8 @@ class AppState:
         else:
             self.config_file = os.path.join(os.path.expanduser("~"), f".smartenroll_config_{self.user_id}.json")
 
-        self.is_spamming = False
+        self._is_spamming = False
+        self._spam_run = None
         self.spam_thread = None
         self.logs = []
         self.stats = {
@@ -207,13 +441,29 @@ class AppState:
         self._spam_lock = threading.Lock()
         self._spam_run_id = 0
         self._dedupe = {}
+        self._spam_relogin_lock = threading.Lock()
+        self._spam_relogin_active = False
+        self._keepalive_busy = False
 
         self._migrate_legacy_config()
         self.load_config_data()
 
         self.registered_classes_schedules = {}
-        threading.Thread(target=self._validate_saved_token, daemon=True).start()
-        threading.Thread(target=self.run_token_refresher_loop, daemon=True).start()
+        _live_states.add(self)
+        _start_keepalive()
+        _background.submit(self._validate_saved_token)
+
+    @property
+    def is_spamming(self):
+        return self._is_spamming
+
+    @is_spamming.setter
+    def is_spamming(self, value):
+        # server.py / discord_bot.py dừng spam bằng `state.is_spamming = False`: báo luôn cho chiến dịch.
+        self._is_spamming = bool(value)
+        run = self._spam_run
+        if not value and run is not None:
+            run.stop()
 
     # ------------------------------------------------------------------ config
 
@@ -385,13 +635,13 @@ class AppState:
         else:
             self.log(f"⚠️ Cổng trường không còn chấp nhận token{age} và không có mật khẩu đã lưu. Vui lòng đăng nhập lại.")
 
-    def run_token_refresher_loop(self):
-        while True:
-            time.sleep(30)
-            try:
-                self._keepalive_tick()
-            except Exception as e:
-                self.log(f"⚠️ [Auto-Refresher] Lỗi khi duy trì token: {e}")
+    def _safe_keepalive_tick(self):
+        try:
+            self._keepalive_tick()
+        except Exception as e:
+            self.log(f"⚠️ [Auto-Refresher] Lỗi khi duy trì token: {e}")
+        finally:
+            self._keepalive_busy = False
 
     def _keepalive_tick(self):
         if not (self.config or {}).get("token") or self.login_job.get("status") == "running":
@@ -477,7 +727,7 @@ class AppState:
         finally:
             sess.close()
 
-    def _login_loop(self, username, password, max_attempts=3, should_continue=None, progress=None):
+    def _login_loop(self, username, password, max_attempts=3, should_continue=None, progress=None, wake_event=None):
         """Đăng nhập, thử lại có backoff. max_attempts=None: thử đến khi được / bị dừng / sai mật khẩu."""
         attempt = 0
         last_rejection, same_rejections = None, 0
@@ -524,7 +774,7 @@ class AppState:
             self.log(f"⏳ Đăng nhập lần {attempt} chưa được: {result.message}. Thử lại sau {delay:.1f}s...")
             if progress:
                 progress(attempt, result.message, delay)
-            if not _sleep_unless_stopped(delay, should_continue):
+            if not _sleep_unless_stopped(delay, should_continue, wake_event):
                 self.last_login_error = "Đã dừng đăng nhập."
                 return False
 
@@ -548,12 +798,15 @@ class AppState:
             self.update_session_headers()
             self._token_gen += 1
             self._last_login_at = time.time()
+            self._last_heartbeat_at = self._last_login_at  # vừa đăng nhập: chưa cần hỏi lại cổng trường
             self.token_ok = True
             self.token_checked_at = self._last_login_at
         self.last_login_error = ""
         self.log(f"🔑 Đăng nhập thành công tài khoản: {username}!")
         # Không bắt người dùng chờ: token đã dùng được ngay, đợt đăng ký cập nhật sau.
-        threading.Thread(target=self._refresh_latest_dot, daemon=True).start()
+        # Đang spam (= đang giờ cao điểm) thì bỏ qua, khỏi gửi thêm request không cần cho việc đăng ký.
+        if not self._is_spamming:
+            _background.submit(self._refresh_latest_dot)
 
     def _refresh_latest_dot(self):
         try:
@@ -630,7 +883,8 @@ class AppState:
                 try:
                     ok = self._login_loop(username, password,
                                           max_attempts=None if persistent else 3,
-                                          should_continue=should_continue, progress=progress)
+                                          should_continue=should_continue, progress=progress,
+                                          wake_event=stop)
                 finally:
                     self._relogin_lock.release()
                 break
@@ -648,7 +902,7 @@ class AppState:
                                   finished_at=time.time(),
                                   last_error="" if ok else self.last_login_error)
 
-    def _recover_from_401(self, seen_gen, should_continue=None, max_attempts=3):
+    def _recover_from_401(self, seen_gen, should_continue=None, max_attempts=3, wake_event=None):
         """Xử lý 401 kiểu single-flight: chỉ một luồng đăng nhập lại, các luồng khác chờ token mới.
 
         seen_gen là thế hệ token lúc gửi request bị 401; nếu token đã đổi thì chỉ cần gửi lại.
@@ -669,7 +923,7 @@ class AppState:
                         return False
                     self.log("🔄 Token bị từ chối (401). Đang đăng nhập lại...")
                     return self._login_loop(creds[0], creds[1], max_attempts=max_attempts,
-                                            should_continue=should_continue)
+                                            should_continue=should_continue, wake_event=wake_event)
                 finally:
                     self._relogin_lock.release()
 
@@ -885,131 +1139,89 @@ class AppState:
             return "already", msg, None
         return "rejected", msg or "Cổng trường từ chối (không kèm thông báo)", None
 
-    def _spam_lane(self, t, done, running, inflight, turbo, stats, run_id):
-        """Một 'làn' gửi request liên tục cho 1 lớp, độc lập với các lớp khác.
+    def _abort_run(self, run, message):
+        """Dừng hẳn một chiến dịch (vd: không còn cách nào đăng nhập lại)."""
+        with self._spam_lock:
+            first = not run.aborted
+            run.aborted = True
+            if self._spam_run is run:
+                self._is_spamming = False
+        run.stop()
+        if first:
+            self.log(message)
 
-        Bản cũ ở chế độ turbo chờ request chậm nhất của cả vòng rồi mới bắn vòng mới;
-        giờ mỗi lớp có làn riêng nên một lớp bị treo không kéo chậm lớp khác.
+    def _begin_spam_relogin(self, seen_gen, run):
+        """Single-flight cho các làn spam: chỉ MỘT luồng đăng nhập lại, các làn khác hẹn giờ kiểm tra lại.
+
+        Trả về "ready" (đã có token mới), "pending" (đang đăng nhập lại) hoặc "no_credentials".
         """
-        name = t.get('name') or t.get('id')
-        target_id = t.get('id')
-        fail_streak = 0
+        with self._spam_relogin_lock:
+            if self._token_gen != seen_gen:
+                return "ready"
+            if self._spam_relogin_active:
+                return "pending"
+            if not self._saved_credentials():
+                self.last_login_error = "Không có mật khẩu đã lưu để tự đăng nhập lại."
+                return "no_credentials"
+            self._spam_relogin_active = True
+        threading.Thread(target=self._spam_relogin_worker, args=(seen_gen, run),
+                         name=f"smartenroll-relogin-{self.user_id}", daemon=True).start()
+        return "pending"
 
-        def active():
-            return running() and not done.is_set()
-
-        while active():
-            # Giới hạn tổng số request đang bay để không biến thành flood.
-            got_slot = False
-            while active():
-                if inflight.acquire(timeout=0.5):
-                    got_slot = True
-                    break
-            if not got_slot:
-                break
-
-            seen_gen = self._token_gen
-            try:
-                outcome, msg, retry_after = self._register_once(t)
-            except Exception as e:  # không để một lỗi lạ giết chết làn
-                outcome, msg, retry_after = "overloaded", f"Lỗi không mong đợi: {e}", None
-            finally:
-                inflight.release()
-            self._bump(stats, "total_requests")
-
-            if outcome in ("success", "already"):
-                # Kết quả thành công vẫn được ghi nhận kể cả khi người dùng vừa bấm dừng.
-                with self._stats_lock:
-                    first = not done.is_set()
-                    done.set()
-                if first:
-                    stats_key = "success_count"
-                    self._bump(stats, stats_key)
-                    if outcome == "success":
-                        self.log(f"🎉 ĐĂNG KÝ THÀNH CÔNG: {name} (ID: {target_id})")
-                    else:
-                        self.log(f"ℹ️ {name}: {msg}")
-                return
-
-            if not active():
-                return
-
-            if outcome == "expired":
-                self._log_deduped(run_id, target_id, f"🔑 {name}: token hết hạn, đang tự đăng nhập lại...")
-                if self._recover_from_401(seen_gen, should_continue=active, max_attempts=None):
-                    self._bump(stats, "relogins")
-                    continue
-                if active():
-                    self.log(f"💀 Không tự đăng nhập lại được ({self.last_login_error}). Dừng spam, vui lòng đăng nhập lại.")
-                    with self._spam_lock:
-                        if self._spam_run_id == run_id:
-                            self.is_spamming = False
-                return
-
-            self._bump(stats, "error_count")
-            if outcome == "rejected":
-                # Server trả lời bình thường nhưng chưa cho đăng ký (lớp đầy, chưa tới giờ...).
-                fail_streak = 0
-                self._log_deduped(run_id, target_id, f"⚠️ {name}: {msg}")
-                delay = random.uniform(0.25, 0.5) if turbo else random.uniform(0.8, 1.2)
-            elif outcome == "timeout":
-                # Đã chờ hết timeout rồi: gửi lại gần như ngay để giữ chỗ trong hàng đợi.
-                self._bump(stats, "timeouts")
-                self._log_deduped(run_id, target_id, f"⏳ {name}: {msg}")
-                delay = random.uniform(0.05, 0.3)
-            else:
-                # Server trả lỗi nhanh (502/503/429...): lùi dần để không bị chặn IP.
-                fail_streak += 1
-                self._log_deduped(run_id, target_id, f"🔥 {name}: {msg}")
-                delay = retry_after or _backoff(fail_streak, base=0.4, cap=2.0 if turbo else 4.0)
-
-            if not _sleep_unless_stopped(delay, active):
-                return
+    def _spam_relogin_worker(self, seen_gen, run):
+        try:
+            ok = self._recover_from_401(seen_gen, should_continue=run.active, max_attempts=None,
+                                        wake_event=run.stop_event)
+            if not ok and run.active():
+                self._abort_run(run, f"💀 Không tự đăng nhập lại được ({self.last_login_error}). "
+                                     "Dừng spam, vui lòng đăng nhập lại.")
+        except Exception as e:
+            self._abort_run(run, f"💀 Lỗi khi tự đăng nhập lại: {e}. Dừng spam, vui lòng đăng nhập lại.")
+        finally:
+            with self._spam_relogin_lock:
+                self._spam_relogin_active = False
 
     def run_spam_loop(self, targets, mode="normal"):
-        with self._spam_lock:
-            self._spam_run_id += 1
-            run_id = self._spam_run_id
-            self.is_spamming = True
-            self._dedupe = {}
-        stats = {"total_requests": 0, "success_count": 0, "error_count": 0, "timeouts": 0, "relogins": 0}
-        self.stats = stats
+        """Chạy chiến dịch đăng ký; trả về khi mọi lớp đã xong hoặc khi bị dừng (is_spamming = False).
+
+        Mỗi lớp 1 làn (Turbo: 3 làn). Làn không giữ luồng riêng mà chạy trên bộ hẹn giờ dùng chung,
+        nên luồng gọi hàm này chỉ ngồi chờ một Event, không tốn CPU.
+        """
         turbo = mode == "turbo"
-        lanes = TURBO_LANES_PER_CLASS if turbo else 1
+        lanes_per_class = TURBO_LANES_PER_CLASS if turbo else 1
+        with self._spam_lock:
+            previous = self._spam_run
+            self._spam_run_id += 1
+            run = _SpamRun(self, self._spam_run_id, turbo)
+            self._spam_run = run
+            self._is_spamming = True
+            self._dedupe = {}
+            self.stats = run.stats
+        if previous is not None:
+            previous.stop()
         self.log(f"🔥 Bắt đầu chiến dịch Spam {len(targets)} lớp ở chế độ {mode.upper()} "
-                 f"({lanes} luồng/lớp, timeout đọc {REGISTER_READ_TIMEOUT}s)...")
+                 f"({lanes_per_class} luồng/lớp, timeout đọc {REGISTER_READ_TIMEOUT}s)...")
 
-        def running():
-            return self.is_spamming and self._spam_run_id == run_id
-
-        inflight = threading.Semaphore(MAX_INFLIGHT_REGISTER)
-        threads = []
+        lanes = []
         for t in targets:
             done = threading.Event()
-            for _ in range(lanes):
-                threads.append(threading.Thread(
-                    target=self._spam_lane,
-                    args=(t, done, running, inflight, turbo, stats, run_id),
-                    daemon=True,
-                ))
+            lanes.extend(_SpamLane(run, t, done) for _ in range(lanes_per_class))
+        run.lanes_left = len(lanes)
+        if not lanes:
+            run.finished.set()
+        delay = 0.0
+        for lane in lanes:
+            lane.schedule(delay)
+            delay += random.uniform(0.05, 0.2)  # rải thời điểm bắt đầu để các làn không bắn cùng một nhịp
 
-        for th in threads:
-            if not running():
-                break
-            th.start()
-            # Rải thời điểm bắt đầu để các làn không bắn cùng một nhịp.
-            _sleep_unless_stopped(random.uniform(0.05, 0.2), running)
-
-        # Không join cứng: request đang bay có thể treo tới REGISTER_READ_TIMEOUT giây sau khi bấm dừng.
-        while running() and any(th.is_alive() for th in threads):
-            time.sleep(0.2)
+        run.finished.wait()
 
         with self._spam_lock:
-            if self._spam_run_id == run_id:
-                finished_all = self.is_spamming
-                self.is_spamming = False
-            else:
-                finished_all = False
+            current = self._spam_run is run
+            finished_all = current and not run.stop_event.is_set()
+            if current:
+                self._is_spamming = False
+        run.stop()  # làn nào còn đang hẹn giờ sẽ tự kết thúc khi tới lượt
         if finished_all:
             self.log("✅ Đã xử lý xong toàn bộ lớp trong danh sách.")
         self.log("⏹ Đã dừng Spam.")

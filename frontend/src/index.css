@@ -1581,3 +1581,12 @@ button, input, select {
   display: grid;
   place-items: center;
 }
+
+.field-note {
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.field-note.error { color: var(--red); }
