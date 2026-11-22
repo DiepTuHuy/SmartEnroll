@@ -1,11 +1,128 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Settings, Play, Square, RefreshCw, Search, Check, AlertCircle, 
-  Terminal, ShieldAlert, Cpu, Layers, HelpCircle, CheckSquare, 
-  Trash2, Eye, EyeOff, CheckCircle2, XCircle, Info, ChevronDown, ShieldCheck,
-  Share2, ExternalLink, Image, Download
+import { useState, useEffect, useRef } from 'react';
+import {
+  Settings, Play, Square, RefreshCw, Search, Check, AlertCircle, Layers, HelpCircle,
+  Trash2, Eye, EyeOff, CheckCircle2, XCircle, Info, ChevronDown, ChevronRight,
+  Share2, ExternalLink, Image as ImageIcon, Download, LayoutGrid, Award, LogOut,
+  GraduationCap, KeyRound, ListChecks, BadgeCheck, UserRound, X
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, MotionConfig, animate, useMotionValue, useTransform } from 'framer-motion';
+
+// ---------------------------------------------------------------- motion presets
+const spring = { type: 'spring', stiffness: 420, damping: 34 };
+const softSpring = { type: 'spring', stiffness: 260, damping: 26 };
+const easeOut = [0.16, 1, 0.3, 1];
+const menuAnim = {
+  initial: { opacity: 0, y: -6, scale: 0.98 },
+  animate: { opacity: 1, y: 0, scale: 1 },
+  // stop catching clicks the moment the menu starts closing, so a quick next click isn't swallowed
+  exit: { opacity: 0, y: -4, scale: 0.98, pointerEvents: 'none' },
+  transition: { duration: 0.16, ease: 'easeOut' },
+  style: { transformOrigin: 'top center' }
+};
+const tabAnim = {
+  initial: { opacity: 0, y: 14 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -10 },
+  transition: { duration: 0.28, ease: easeOut }
+};
+const swapAnim = {
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -8 },
+  transition: { duration: 0.18 }
+};
+const fillBox = (originY = '50%') => ({ transformBox: 'fill-box', transformOrigin: `50% ${originY}` });
+
+// Original illustration for the greeting card: a timetable with the chosen slot ticked.
+// Only a one-off entrance (slot pops in, tick draws itself): no endless loops, so an open tab
+// left for hours costs nothing.
+function HeroArt() {
+  return (
+    <svg viewBox="0 0 240 200" fill="none" aria-hidden="true">
+      <circle cx="166" cy="64" r="46" fill="#fdf0e1" />
+      <circle cx="190" cy="42" r="15" fill="#f08a24" />
+      <rect x="46" y="52" width="136" height="124" rx="20" fill="#fff" stroke="#e6e5e1" strokeWidth="2" />
+      <rect x="46" y="52" width="136" height="36" rx="20" fill="#161615" />
+      <rect x="46" y="70" width="136" height="18" fill="#161615" />
+      <rect x="74" y="40" width="8" height="24" rx="4" fill="#3b3a37" />
+      <rect x="146" y="40" width="8" height="24" rx="4" fill="#3b3a37" />
+      <rect x="62" y="67" width="42" height="6" rx="3" fill="#fff" opacity="0.85" />
+      <rect x="110" y="67" width="18" height="6" rx="3" fill="#f08a24" />
+      {[100, 126, 152].map(y => [62, 92, 122, 152].map(x => (
+        <rect key={`${x}-${y}`} x={x} y={y} width="22" height="18" rx="6" fill="#f6f6f4" />
+      )))}
+      <rect x="152" y="100" width="22" height="18" rx="6" fill="#ecebfa" />
+      <rect x="62" y="152" width="22" height="18" rx="6" fill="#ecebe8" />
+      <motion.g
+        style={fillBox()}
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 14, delay: 0.45 }}
+      >
+        <rect x="122" y="126" width="22" height="18" rx="6" fill="#f08a24" />
+        <motion.path
+          d="M127.5 135.5l4 4 7.5-7.5" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+          initial={{ pathLength: 0 }}
+          animate={{ pathLength: 1 }}
+          transition={{ duration: 0.45, delay: 0.8, ease: 'easeOut' }}
+        />
+      </motion.g>
+      <ellipse cx="27" cy="142" rx="7" ry="19" transform="rotate(-24 27 142)" fill="#2a9466" />
+      <ellipse cx="40" cy="138" rx="7" ry="21" transform="rotate(16 40 138)" fill="#47b483" />
+      <rect x="18" y="160" width="32" height="26" rx="8" fill="#161615" />
+      <circle cx="214" cy="150" r="6" fill="#ecebfa" />
+      <circle cx="202" cy="172" r="3.5" fill="#f08a24" />
+    </svg>
+  );
+}
+
+// Counts up/down to the new value instead of jumping.
+function AnimatedNumber({ value }) {
+  const target = Number(value) || 0;
+  const mv = useMotionValue(target);
+  const text = useTransform(mv, v => Math.round(v).toLocaleString('vi-VN'));
+  useEffect(() => {
+    const controls = animate(mv, target, { duration: 0.7, ease: easeOut });
+    return () => controls.stop();
+  }, [mv, target]);
+  return <motion.span>{text}</motion.span>;
+}
+
+// Check mark that draws itself when a class is picked.
+function TickMark({ on }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <motion.path
+        d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"
+        initial={false}
+        animate={{ pathLength: on ? 1 : 0, opacity: on ? 1 : 0 }}
+        transition={{ duration: 0.26, ease: 'easeOut' }}
+      />
+    </svg>
+  );
+}
+
+// Small confetti burst played when a registration succeeds (deterministic spread, no randomness).
+const BURST_COLORS = ['#f08a24', '#2a9466', '#5753c4', '#f6b36b'];
+function SuccessBurst() {
+  return (
+    <span className="burst" aria-hidden="true">
+      {Array.from({ length: 14 }, (_, i) => {
+        const angle = (i / 14) * Math.PI * 2 + (i % 2 ? 0.22 : -0.14);
+        const distance = 40 + ((i * 13) % 26);
+        return (
+          <motion.i
+            key={i}
+            style={{ background: BURST_COLORS[i % BURST_COLORS.length] }}
+            initial={{ x: 0, y: 0, scale: 0.5, opacity: 1, rotate: 0 }}
+            animate={{ x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, scale: 1, opacity: 0, rotate: 160 }}
+            transition={{ duration: 0.95, ease: easeOut }}
+          />
+        );
+      })}
+    </span>
+  );
+}
 
 export default function App() {
   // App States
@@ -19,9 +136,6 @@ export default function App() {
   const [selectedDot, setSelectedDot] = useState('');
   const [regType, setRegType] = useState('new'); // new, repeat, improve
 
-  // Token countdown timer states
-  const [timeLeft, setTimeLeft] = useState(900); // 15 minutes default
-  const [timerActive, setTimerActive] = useState(false);
 
   // Registered classes states
   const [registeredClasses, setRegisteredClasses] = useState([]);
@@ -59,12 +173,43 @@ export default function App() {
   const [customDialog, setCustomDialog] = useState(null); // Custom alert/confirm modal dialog
   const [showLoginOverlay, setShowLoginOverlay] = useState(true); // Fullscreen login modal on app entry
   const [showPassword, setShowPassword] = useState(false); // Toggle password field visibility
+  // Login runs as a background job on the local server; the UI only polls its progress.
+  const [autoRetryLogin, setAutoRetryLogin] = useState(true); // keep retrying until the portal lets us in
+  const [loginJob, setLoginJob] = useState(null); // { status, attempts, last_error, retry_in, elapsed }
+  const loginPollingRef = useRef(false);
+  const [tokenExpiresAt, setTokenExpiresAt] = useState(null); // epoch seconds from the saved JWT
+  const [tokenStillValid, setTokenStillValid] = useState(false); // > 1h left: no need to log in again
+  const [tokenOk, setTokenOk] = useState(null); // last answer from the portal: true / false / null (unknown)
+  const [tokenCheckedAt, setTokenCheckedAt] = useState(null); // epoch seconds of that answer
 
   // Spam states
   const [isSpamming, setIsSpamming] = useState(false);
   const [spamMode, setSpamMode] = useState('normal'); // normal, turbo
   const [spamStats, setSpamStats] = useState({ total_requests: 0, success_count: 0, error_count: 0 });
   const [logs, setLogs] = useState([]);
+  const [burstKey, setBurstKey] = useState(0); // replays the confetti burst
+  const [toast, setToast] = useState(null);    // { id, text }
+  const prevSuccessRef = useRef(null);
+
+  // Update stats from the server and celebrate when the success count goes up.
+  const lastStatsJsonRef = useRef('');
+  const applySpamStats = (stats) => {
+    // Unchanged stats -> no state update -> no re-render of the whole page.
+    const json = JSON.stringify(stats || {});
+    if (json === lastStatsJsonRef.current) return;
+    lastStatsJsonRef.current = json;
+    setSpamStats(stats);
+    const success = stats?.success_count ?? 0;
+    const prev = prevSuccessRef.current;
+    prevSuccessRef.current = success;
+    if (prev !== null && success > prev) {
+      const id = Date.now();
+      const gained = success - prev;
+      setBurstKey(k => k + 1);
+      setToast({ id, text: gained > 1 ? `Đăng ký thành công thêm ${gained} lớp` : 'Đăng ký thành công 1 lớp' });
+      setTimeout(() => setToast(t => (t && t.id === id ? null : t)), 4500);
+    }
+  };
   
   // UI views
   const [showToken, setShowToken] = useState(false);
@@ -205,81 +350,62 @@ export default function App() {
     }
   };
 
-  // Reset the 15-minute token countdown timer
+  // Clear the "expired" flag after any successful call to the portal
   const resetSessionTimer = () => {
-    setTimeLeft(900); // 15 minutes
     setIsTokenExpired(false);
   };
 
-  // Format seconds into MM:SS
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  // Sync config + real token status from the local server.
+  // syncForm: also fill form fields (only on page load / after a new login, not on the 30s poll,
+  //           otherwise it overwrites what the user is typing or the period they picked).
+  // initial:  on page load, go straight to the dashboard if the saved token is still good.
+  // Mirror of `config` so the poll can tell whether anything actually changed.
+  const configRef = useRef(null);
+  useEffect(() => { configRef.current = config; }, [config]);
 
-  // Keep countdown timer active depending on login status
-  useEffect(() => {
-    if (!configExists || isTokenExpired) {
-      setTimerActive(false);
-      if (isTokenExpired) {
-        setTimeLeft(0);
-      }
-      return;
-    }
-    setTimerActive(true);
-  }, [configExists, isTokenExpired]);
-
-  // Countdown loop
-  useEffect(() => {
-    let interval;
-    if (timerActive && timeLeft > 0) {
-      interval = setInterval(() => {
-        if (isSpamming) {
-          // Keep session alive while actively spamming
-          setTimeLeft(900);
-        } else {
-          setTimeLeft(prev => {
-            if (prev <= 1) {
-              setIsTokenExpired(true);
-              setTimerActive(false);
-              return 0;
-            }
-            return prev - 1;
-          });
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [timerActive, timeLeft, isSpamming]);
-
-  // Fetch initial config
-  const fetchConfig = async () => {
+  const fetchConfig = async ({ syncForm = true, initial = false } = {}) => {
     try {
       const res = await fetch('/api/config');
       const data = await res.json();
+      const exp = data.token_expires_at || null;
+      const notExpiredByDate = !exp || exp * 1000 > Date.now();
+      setTokenExpiresAt(exp);
+      setTokenStillValid(!!exp && exp * 1000 > Date.now() + 60 * 60 * 1000);
+      setTokenCheckedAt(data.token_checked_at || null);
+      setTokenOk(data.token_ok ?? null);
       if (data.exists) {
-        setConfig(data.config);
+        // Only hand React a new object when the content changed. A fresh object every 30 s used to
+        // re-trigger the courses/registered-classes effect, i.e. 3+ portal requests twice a minute.
+        if (JSON.stringify(data.config) !== JSON.stringify(configRef.current)) {
+          setConfig(data.config);
+        }
         setConfigExists(true);
-        setIsTokenExpired(false);
-        resetSessionTimer();
-        setManToken(data.config.token || '');
-        setManCookie(data.config.cookie || '');
-        setManIdDot(data.config.id_dot || '');
-        setManUserAgent(data.config.user_agent || '');
-        setUsername(data.config.username || '');
-        setPassword(data.config.password || '');
-        setFbUsername(data.config.fb_username || '');
-        setFbPassword(data.config.fb_password || '');
-        if (data.config.id_dot) {
-          setSelectedDot(data.config.id_dot);
+        // Only the server knows if the portal still accepts the token (it checks every few minutes).
+        setIsTokenExpired(data.token_ok === false || !notExpiredByDate);
+        if (syncForm) {
+          setManToken(data.config.token || '');
+          setManCookie(data.config.cookie || '');
+          setManIdDot(data.config.id_dot || '');
+          setManUserAgent(data.config.user_agent || '');
+          setUsername(data.config.username || '');
+          setPassword(data.config.password || '');
+          setFbUsername(data.config.fb_username || '');
+          setFbPassword(data.config.fb_password || '');
+          if (data.config.id_dot) {
+            setSelectedDot(data.config.id_dot);
+          }
+        }
+        if (initial && data.token_ok !== false && notExpiredByDate) {
+          setShowLoginOverlay(false);
         }
       } else {
         setConfig(null);
         setConfigExists(false);
         setIsTokenExpired(false);
-        setUsername('');
-        setPassword('');
+        if (syncForm) {
+          setUsername('');
+          setPassword('');
+        }
       }
     } catch (err) {
       console.error("Lỗi lấy cấu hình:", err);
@@ -287,19 +413,19 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchConfig();
+    fetchConfig({ initial: true });
   }, []);
 
-  // Periodic config sync to keep session timer fresh when background auto-refresher updates token
+  // Keep token status in sync with the server (which re-logins on its own if the portal drops the token)
   useEffect(() => {
     let interval;
-    if (configExists && !isTokenExpired) {
+    if (configExists) {
       interval = setInterval(() => {
-        fetchConfig();
-      }, 30000); // Poll every 30 seconds
+        if (!document.hidden) fetchConfig({ syncForm: false });
+      }, 30000); // Poll every 30 seconds, skipped while the tab is hidden
     }
     return () => clearInterval(interval);
-  }, [configExists, isTokenExpired]);
+  }, [configExists]);
 
   // Fetch available registration periods
   const fetchDots = async (type) => {
@@ -312,15 +438,16 @@ export default function App() {
         const loadedDots = data.data || [];
         setDots(loadedDots);
         if (loadedDots.length > 0) {
-          const hasCurrent = loadedDots.some(d => (d.id || d.idDot) === selectedDot);
+          // ids come back as numbers while the saved one is a string: compare as strings,
+          // otherwise the same period gets "re-selected" and courses are fetched twice
+          const hasCurrent = loadedDots.some(d => String(d.id || d.idDot) === String(selectedDot));
           if (!hasCurrent) {
-            setSelectedDot(loadedDots[0].id || loadedDots[0].idDot);
+            setSelectedDot(String(loadedDots[0].id || loadedDots[0].idDot));
           }
         }
       } else {
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
-          setTimeLeft(0);
           setDots([]);
         }
       }
@@ -416,7 +543,6 @@ export default function App() {
       } else {
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
-          setTimeLeft(0);
           await alert("Lỗi hủy đăng ký: Phiên đăng nhập (Token) của bạn đã hết hạn. Vui lòng bấm lấy lại Token!");
         } else {
           await alert("Lỗi hủy đăng ký: " + data.message);
@@ -457,43 +583,33 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isAutoRunning]);
 
-  // Poll Spam status
+  // Poll spam status: every second while running, every 5 s otherwise, nothing while the tab is hidden
+  // (the spam itself runs on the local server, so a hidden tab misses nothing).
   useEffect(() => {
-    let interval;
-    if (isSpamming) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch('/api/spam/status');
-          const data = await res.json();
-          setIsSpamming(data.is_spamming);
-          setSpamStats(data.stats);
-          setLogs(data.logs || []);
-        } catch (err) {
-          console.error(err);
+    const interval = setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch('/api/spam/status');
+        const data = await res.json();
+        setIsSpamming(data.is_spamming);
+        applySpamStats(data.stats);
+        if (isSpamming || data.is_spamming) {
+          const next = data.logs || [];
+          // keep the same array when nothing new was logged, so React skips the re-render
+          setLogs(prev => (prev.length === next.length && prev[prev.length - 1] === next[next.length - 1] ? prev : next));
         }
-      }, 1000);
-    } else {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch('/api/spam/status');
-          const data = await res.json();
-          setIsSpamming(data.is_spamming);
-          setSpamStats(data.stats);
-          if (data.is_spamming) {
-            setLogs(data.logs || []);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      }, 3000);
-    }
+      } catch (err) {
+        console.error(err);
+      }
+    }, isSpamming ? 1000 : 5000);
     return () => clearInterval(interval);
   }, [isSpamming]);
 
   // Auto scroll terminal
   useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    const box = terminalEndRef.current;
+    if (box) {
+      box.scrollTop = box.scrollHeight;
     }
   }, [logs]);
 
@@ -548,45 +664,162 @@ export default function App() {
     }
   };
 
-  // Login handler
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  const applyLoginSuccess = async (cfg) => {
+    setConfig(cfg);
+    setConfigExists(true);
+    setIsTokenExpired(false);
+    resetSessionTimer();
+    setManToken(cfg.token || '');
+    setManCookie(cfg.cookie || '');
+    setManIdDot(cfg.id_dot || '');
+    setManUserAgent(cfg.user_agent || '');
+    if (cfg.id_dot) {
+      setSelectedDot(cfg.id_dot);
+    }
+    fetchConfig(); // picks up token expiry
+    setShowLoginOverlay(false);
+    await alert('Đăng nhập cổng UTH thành công!');
+  };
+
+  // Poll the background login job until it finishes. Survives brief outages of the local server.
+  const pollLoginStatus = async () => {
+    if (loginPollingRef.current) return;
+    loginPollingRef.current = true;
+    setLoginLoading(true);
+    let localServerDown = 0;
+    while (loginPollingRef.current) {
+      let data;
+      try {
+        const res = await fetch('/api/config/login/status', { cache: 'no-store' });
+        data = await res.json();
+        localServerDown = 0;
+      } catch {
+        localServerDown++;
+        setLoginError(`Không liên lạc được server SmartEnroll trên máy này (lần ${localServerDown}). Hãy kiểm tra cửa sổ server còn chạy không — đang chờ kết nối lại...`);
+        await sleep(1500);
+        continue;
+      }
+      setLoginJob(data);
+      if (data.status === 'running') {
+        setLoginError('');
+        await sleep(1000);
+        continue;
+      }
+      if (!loginPollingRef.current) break; // user pressed stop meanwhile
+      loginPollingRef.current = false;
+      setLoginLoading(false);
+      if (data.status === 'success' && data.config) {
+        setLoginJob(null);
+        await applyLoginSuccess(data.config);
+      } else if (data.status === 'failed') {
+        setLoginError(data.last_error || 'Đăng nhập thất bại!');
+      } else if (data.status === 'idle') {
+        setLoginError('Server SmartEnroll vừa khởi động lại, tiến trình đăng nhập đã mất. Hãy bấm đăng nhập lại.');
+      }
+      return;
+    }
+    setLoginLoading(false);
+  };
+
+  const stopLogin = async () => {
+    loginPollingRef.current = false;
+    setLoginLoading(false);
+    try {
+      await fetch('/api/config/login/stop', { method: 'POST' });
+    } catch (err) {
+      console.error(err);
+    }
+    setLoginError('Đã dừng đăng nhập.');
+  };
+
+  // Login handler (the same button stops a running login)
   const handleLogin = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    if (loginLoading) {
+      await stopLogin();
+      return;
+    }
     if (!username || !password) {
       setLoginError('Vui lòng điền đầy đủ tài khoản và mật khẩu!');
       return;
     }
+
     setLoginLoading(true);
     setLoginError('');
-    try {
-      const res = await fetch('/api/config/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (res.status === 200 && data.success) {
-        setConfig(data.config);
-        setConfigExists(true);
-        setIsTokenExpired(false);
-        resetSessionTimer();
-        setManToken(data.config.token || '');
-        setManCookie(data.config.cookie || '');
-        setManIdDot(data.config.id_dot || '');
-        setManUserAgent(data.config.user_agent || '');
-        if (data.config.id_dot) {
-          setSelectedDot(data.config.id_dot);
-        }
-        setShowLoginOverlay(false);
-        await alert('Đăng nhập cổng UTH thành công!');
-      } else {
-        setLoginError(data.message || 'Tài khoản hoặc mật khẩu không chính xác!');
+    setLoginJob(null);
+
+    // The local server may still be starting up: give it a few seconds before giving up.
+    let data = null;
+    for (let i = 0; i < 8 && !data; i++) {
+      try {
+        const res = await fetch('/api/config/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, persistent: autoRetryLogin })
+        });
+        data = await res.json();
+      } catch (err) {
+        console.error(err);
+        setLoginError('Đang chờ server SmartEnroll trên máy này phản hồi...');
+        await sleep(1000);
       }
-    } catch (err) {
-      console.error(err);
-      setLoginError('Không thể kết nối đến server SmartEnroll!');
-    } finally {
-      setLoginLoading(false);
     }
+    if (!data) {
+      setLoginLoading(false);
+      setLoginError('Không kết nối được server SmartEnroll trên máy này. Hãy kiểm tra cửa sổ server (server.py) còn chạy không.');
+      return;
+    }
+    if (!data.success) {
+      setLoginLoading(false);
+      setLoginError(data.message || 'Không thể bắt đầu đăng nhập!');
+      return;
+    }
+    setLoginError('');
+    pollLoginStatus();
+  };
+
+  // Resume progress display if a login job is already running (e.g. after reloading the page)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/config/login/status');
+        const data = await res.json();
+        if (data.status === 'running') {
+          if (data.username) setUsername(data.username);
+          setLoginJob(data);
+          pollLoginStatus();
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+    return () => { loginPollingRef.current = false; };
+  }, []);
+
+  const formatExpiry = (ts) => new Date(ts * 1000).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  // Progress panel shown under both login forms while the background job runs
+  const renderLoginProgress = () => {
+    if (!loginLoading || !loginJob) return null;
+    const attempts = loginJob.attempts || 0;
+    const elapsed = Math.round(loginJob.elapsed || 0);
+    return (
+      <div className="notice notice-info progress-note">
+        <RefreshCw size={15} className="spin" />
+        <div>
+          <strong>{attempts === 0 ? 'Đang gửi yêu cầu đăng nhập…' : `Cổng trường đang nghẽn, đã thử ${attempts} lần (${elapsed}s)`}</strong>
+          {loginJob.last_error && (
+            <div className="sub">
+              Lần gần nhất: {loginJob.last_error}
+              {loginJob.retry_in != null && loginJob.retry_in > 0 && ` · thử lại sau ${loginJob.retry_in.toFixed(1)}s`}
+            </div>
+          )}
+          <div className="sub">Đăng nhập chạy trên server ở máy bạn, đóng hay tải lại tab cũng không bị ngắt.</div>
+        </div>
+      </div>
+    );
   };
 
   // Logout handler
@@ -598,6 +831,9 @@ export default function App() {
       if (data.success) {
         setConfig(null);
         setConfigExists(false);
+        setTokenExpiresAt(null);
+        setTokenStillValid(false);
+        setTokenOk(null);
         setUsername('');
         setPassword('');
         setManToken('');
@@ -635,7 +871,6 @@ export default function App() {
       } else {
         if (res.status === 401 || data.expired || (data.message && data.message.includes("Token hết hạn"))) {
           setIsTokenExpired(true);
-          setTimeLeft(0);
           await alert("Lỗi quét lớp: Phiên đăng nhập (Token) của bạn đã hết hạn hoặc bị hủy trên máy chủ trường. Vui lòng bấm lấy lại Token!");
         } else {
           await alert("Lỗi quét lớp: " + data.message);
@@ -714,1167 +949,958 @@ export default function App() {
     return label.includes(courseSearch.toLowerCase());
   });
 
-  return (
-    <div className="app-container">
-      {/* HEADER SECTION */}
-      <motion.header 
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="app-header"
-      >
-        <div className="brand-wrapper">
-          <div className="brand-icon">
-            <Cpu className="w-6 h-6" />
-          </div>
+  // ---------------------------------------------------------------- view helpers
+  const [topSearchOpen, setTopSearchOpen] = useState(false);
+  const scannerRef = useRef(null);
+  const resultsRef = useRef(null);
+  const consoleRef = useRef(null);
+  const registeredRef = useRef(null);
+  const accountRef = useRef(null);
+
+  const scrollToRef = (ref) => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const courseLabel = (c) => `[${c.maHocPhan}] ${c.tenHocPhan || c.tenMonHoc || ''}`;
+  const selectedCourseObj = courses.find(c => c.maHocPhan === selectedCourse);
+  const visibleClasses = classes.filter(cls => !hideConflicting || !cls.is_conflicting);
+  const hiddenConflicts = classes.length - visibleClasses.length;
+  const totalCredits = registeredClasses.reduce((sum, rc) => sum + (Number(rc.soTinChi) || 0), 0);
+
+  const status = isSpamming
+    ? { cls: 'is-running', text: 'Đang gửi đăng ký' }
+    : !configExists
+      ? { cls: 'is-pending', text: 'Chưa đăng nhập' }
+      : isTokenExpired
+        ? { cls: 'is-expired', text: 'Phiên đăng nhập hết hạn' }
+        : { cls: 'is-ready', text: 'Sẵn sàng' };
+
+  const portalCheckText = tokenOk === false
+    ? 'Bị từ chối, đang đăng nhập lại'
+    : tokenOk && tokenCheckedAt
+      ? `Còn hiệu lực lúc ${new Date(tokenCheckedAt * 1000).toLocaleTimeString('vi-VN')}`
+      : 'Đang kiểm tra…';
+
+  const logTone = (log) => {
+    if (log.includes('THÀNH CÔNG') || log.includes('🎉')) return 'success';
+    if (log.includes('Lỗi') || log.includes('❌') || log.includes('💀')) return 'danger';
+    if (log.includes('⚠️')) return 'warning';
+    if (log.includes('ℹ️')) return 'info';
+    return '';
+  };
+
+  let heroText;
+  let heroAction;
+  if (!configExists) {
+    heroText = <>Bạn chưa đăng nhập cổng trường. Hãy đăng nhập <strong>trước giờ mở đăng ký</strong> để không phải chen vào lúc cổng nghẽn.</>;
+    heroAction = <button type="button" className="btn btn-dark" onClick={() => setShowLoginOverlay(true)}>Đăng nhập</button>;
+  } else if (isTokenExpired) {
+    heroText = <>Cổng trường không còn chấp nhận phiên đăng nhập này. Server đang tự đăng nhập lại; nếu vẫn báo hết hạn, hãy đăng nhập lại.</>;
+    heroAction = <button type="button" className="btn btn-dark" onClick={() => setShowLoginOverlay(true)}>Đăng nhập lại</button>;
+  } else if (isSpamming) {
+    heroText = <>Tool đang gửi đăng ký liên tục. Cứ để máy chạy, kết quả hiện ở <strong>nhật ký</strong> bên dưới.</>;
+    heroAction = <button type="button" className="btn btn-dark" onClick={() => scrollToRef(consoleRef)}>Xem nhật ký</button>;
+  } else {
+    heroText = <>Phiên đăng nhập còn hạn{tokenExpiresAt ? <> đến <strong>{formatExpiry(tokenExpiresAt)}</strong></> : null}. Chọn lớp, rồi bấm chạy spam trước giờ mở đăng ký vài phút.</>;
+    heroAction = <button type="button" className="btn btn-dark" onClick={() => scrollToRef(scannerRef)}>Chọn lớp học phần</button>;
+  }
+
+  const renderAutoConfigStatus = () => (
+    <>
+      {isAutoRunning && (
+        <div className="notice notice-info">
+          <Info size={15} />
           <div>
-            <h1 className="app-title">SmartEnroll UTH</h1>
-            <p className="app-subtitle">Hệ thống hỗ trợ đăng ký học phần tự động thông minh</p>
+            <strong>Lấy token qua Chrome</strong>
+            <ol>
+              <li>Một cửa sổ Chrome sẽ tự mở.</li>
+              <li>Bạn đăng nhập tay vào portal.</li>
+              <li>Tool tự bắt token, đợt học rồi đóng Chrome.</li>
+            </ol>
           </div>
         </div>
-        
-        <div style={{ display: 'flex', gap: '8px', marginLeft: 'auto', marginRight: '16px' }}>
-          <button 
-            onClick={() => setActiveTab('enroll')} 
-            className={`btn ${activeTab === 'enroll' ? 'btn-secondary' : 'btn-outline'}`}
-            style={{ minHeight: 'auto', padding: '8px 16px', fontSize: '0.825rem' }}
-          >
-            <Layers className="w-4 h-4" />
-            Đăng ký học phần
-          </button>
-          <button 
-            onClick={() => setActiveTab('drl')} 
-            className={`btn ${activeTab === 'drl' ? 'btn-secondary' : 'btn-outline'}`}
-            style={{ minHeight: 'auto', padding: '8px 16px', fontSize: '0.825rem' }}
-          >
-            <Share2 className="w-4 h-4" />
-            Điểm rèn luyện
-          </button>
-          <button 
-            onClick={() => window.open('http://localhost:5001/api/export', '_blank')} 
-            className="btn btn-outline"
-            style={{ minHeight: 'auto', padding: '8px 16px', fontSize: '0.825rem' }}
-          >
-            <Download className="w-4 h-4" />
-            Xuất dữ liệu
-          </button>
-        </div>
+      )}
+      {autoStatus === 'success' && !isAutoRunning && (
+        <div className="notice notice-ok"><CheckCircle2 size={15} /><span>Đã lấy token từ Chrome.</span></div>
+      )}
+      {autoStatus === 'failed' && !isAutoRunning && (
+        <div className="notice notice-err"><XCircle size={15} /><span>Không lấy được token. Hãy thử lại.</span></div>
+      )}
+    </>
+  );
 
-        <div className="header-badges">
-          <div className={`badge ${isTokenExpired ? 'badge-expired' : configExists ? 'badge-ready' : 'badge-pending'}`}>
-            <span className="badge-dot pulse-indicator"></span>
-            {isTokenExpired ? 'Cấu hình: HẾT HẠN' : configExists ? 'Cấu hình: ĐÃ SẴN SÀNG' : 'Cấu hình: CHƯA CÓ'}
+  const seenLogs = {};
+  const keyedLogs = logs.map(text => {
+    seenLogs[text] = (seenLogs[text] || 0) + 1;
+    return { key: `${text}#${seenLogs[text]}`, text };
+  });
+
+  const fadeUp = (delay = 0) => ({
+    initial: { opacity: 0, y: 14 },
+    animate: { opacity: 1, y: 0 },
+    transition: { duration: 0.35, delay, ease: [0.16, 1, 0.3, 1] }
+  });
+
+  return (
+    <MotionConfig reducedMotion="user">
+    <div className="shell">
+      {/* ---------------------------------------------------------- SIDEBAR */}
+      <aside className="sidebar" aria-label="Điều hướng">
+        <div className="sidebar-logo" title="SmartEnroll UTH">
+          <GraduationCap size={22} />
+        </div>
+        <nav className="nav">
+          <button
+            type="button"
+            className={`nav-btn ${activeTab === 'enroll' ? 'active' : ''} ${isSpamming ? 'is-busy' : ''}`}
+            onClick={() => setActiveTab('enroll')}
+            title="Đăng ký học phần"
+            aria-label="Đăng ký học phần"
+            aria-current={activeTab === 'enroll' ? 'page' : undefined}
+          >
+            {activeTab === 'enroll' && <motion.span layoutId="nav-indicator" className="nav-indicator" transition={spring} />}
+            <LayoutGrid size={20} />
+          </button>
+          <button
+            type="button"
+            className={`nav-btn ${activeTab === 'drl' ? 'active' : ''}`}
+            onClick={() => setActiveTab('drl')}
+            title="Điểm rèn luyện"
+            aria-label="Điểm rèn luyện"
+            aria-current={activeTab === 'drl' ? 'page' : undefined}
+          >
+            {activeTab === 'drl' && <motion.span layoutId="nav-indicator" className="nav-indicator" transition={spring} />}
+            <Award size={20} />
+          </button>
+          <button
+            type="button"
+            className="nav-btn"
+            onClick={() => window.open('/api/export', '_blank')}
+            disabled={!configExists}
+            title="Xuất dữ liệu học tập (JSON)"
+            aria-label="Xuất dữ liệu học tập"
+          >
+            <Download size={20} />
+          </button>
+          <button
+            type="button"
+            className="nav-btn"
+            onClick={() => setShowManual(true)}
+            title="Cấu hình thủ công"
+            aria-label="Cấu hình thủ công"
+          >
+            <Settings size={20} />
+          </button>
+          <div className="nav-bottom">
+            <button
+              type="button"
+              className="nav-btn nav-danger"
+              onClick={handleLogout}
+              disabled={!configExists}
+              title="Đăng xuất"
+              aria-label="Đăng xuất"
+            >
+              <LogOut size={20} />
+            </button>
           </div>
-          
-          {isSpamming && (
-            <div className="badge badge-active">
-              <span className="badge-dot pulse-indicator"></span>
-              ĐANG SPAM ĐĂNG KÝ
-            </div>
-          )}
-        </div>
-      </motion.header>
+        </nav>
+      </aside>
 
-      {/* MAIN CONTAINER */}
-      <div className="main-grid">
-        
-        {/* LEFT COLUMN: CONFIG & SCANNER */}
-        <div className="col-flex">
-          
-          {/* CONFIGURATION CARD */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="card"
-          >
-            <div className="card-header">
-              <h2 className="card-title purple">
-                <Settings className="w-5 h-5" />
-                Cấu hình Đăng nhập & Đợt
-              </h2>
-              <button 
-                onClick={() => setShowManual(!showManual)}
-                className="btn-text"
-              >
-                {showManual ? 'Hiện trạng thái' : 'Cập nhật thủ công'}
-              </button>
-            </div>
-
-            <AnimatePresence mode="wait">
-              {!showManual ? (
-                <motion.div 
-                  key="status"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
-                >
-                  {configExists ? (
-                    <div className="config-display">
-                      {config && (
-                        <div className="config-item" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span className="config-key">Sinh viên đăng nhập:</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: '700', color: '#10b981' }}>
-                              {config.username || 'Quét từ Chrome'}
-                            </span>
-                            <button 
-                              onClick={handleLogout} 
-                              className="btn btn-outline" 
-                              style={{ padding: '2px 8px', fontSize: '0.8rem', minHeight: 'auto', border: '1px solid #ef4444', color: '#ef4444' }}
-                            >
-                              Đăng xuất
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="config-item">
-                        <span className="config-key">Token đăng nhập:</span>
-                        <div className="config-value">
-                          <span>{showToken ? config.token : '••••••••••••••••••••••••'}</span>
-                          <button onClick={() => setShowToken(!showToken)} className="eye-button">
-                            {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="config-item">
-                        <span className="config-key">Cookie Portal UTH:</span>
-                        <div className="config-value">
-                          <span>
-                            {showCookie ? config.cookie : '••••••••••••••••••••••••'}
-                          </span>
-                          <button onClick={() => setShowCookie(!showCookie)} className="eye-button">
-                            {showCookie ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                      
-                      <div className="config-item" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px' }}>
-                        <span className="config-key">Chọn Đợt học:</span>
-                        <select 
-                          value={selectedDot} 
-                          onChange={(e) => setSelectedDot(e.target.value)}
-                          className="select-input"
-                          style={{ maxWidth: '220px', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
-                        >
-                          {dots.length > 0 ? (
-                            dots.map(d => (
-                              <option key={d.id || d.idDot} value={d.id || d.idDot}>
-                                {d.tenHocKy || d.tenDot || d.id || d.idDot}
-                              </option>
-                            ))
-                          ) : (
-                            <option value={config.id_dot}>{config.id_dot}</option>
-                          )}
-                        </select>
-                      </div>
-
-                      <div className="config-item">
-                        <span className="config-key">Loại Đăng ký:</span>
-                        <select 
-                          value={regType} 
-                          onChange={(e) => setRegType(e.target.value)}
-                          className="select-input"
-                          style={{ maxWidth: '220px', background: 'rgba(16, 12, 34, 0.85)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
-                        >
-                          <option value="new">Học mới (Đăng ký học phần)</option>
-                          <option value="repeat">Học lại</option>
-                          <option value="improve">Học cải thiện</option>
-                          <option value="cond_new">Môn điều kiện (Học mới)</option>
-                          <option value="cond_repeat">Môn điều kiện (Học lại)</option>
-                        </select>
-                      </div>
-
-                      <div className="config-item" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px' }}>
-                        <span className="config-key">Thời hạn Token:</span>
-                        <span 
-                          style={{ 
-                            fontWeight: '700', 
-                            fontSize: '0.95rem', 
-                            fontFamily: 'var(--font-mono)', 
-                            color: timeLeft < 180 ? '#fb7185' : '#38bdf8',
-                            textShadow: timeLeft < 180 ? '0 0 8px rgba(244, 63, 94, 0.5)' : '0 0 8px rgba(14, 165, 233, 0.5)'
-                          }}
-                        >
-                          {timeLeft > 0 ? formatTime(timeLeft) : 'HẾT HẠN (00:00)'}
-                        </span>
-                      </div>
-                    </div>
+      <main className="main">
+        {/* -------------------------------------------------------- TOP BAR */}
+        <header className="topbar">
+          <div className="top-search">
+            <Search size={18} />
+            <input
+              type="search"
+              value={courseSearch}
+              onChange={(e) => { setCourseSearch(e.target.value); setTopSearchOpen(true); }}
+              onFocus={() => setTopSearchOpen(true)}
+              onBlur={() => setTopSearchOpen(false)}
+              placeholder="Tìm môn học theo mã hoặc tên…"
+              aria-label="Tìm môn học"
+            />
+            <AnimatePresence>
+            {topSearchOpen && courseSearch.trim() && (
+              <motion.div className="menu" {...menuAnim}>
+                <div className="menu-list">
+                  {filteredCourses.length > 0 ? (
+                    filteredCourses.slice(0, 8).map((c, i) => (
+                      <button
+                        type="button"
+                        key={`${c.maHocPhan}-${i}`}
+                        className={`menu-item ${selectedCourse === c.maHocPhan ? 'selected' : ''}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelectedCourse(c.maHocPhan);
+                          setTopSearchOpen(false);
+                          setActiveTab('enroll');
+                          setTimeout(() => scrollToRef(scannerRef), 50);
+                        }}
+                      >
+                        <span>{courseLabel(c)}</span>
+                        {c.isBatBuoc && <span className="tag">Bắt buộc</span>}
+                      </button>
+                    ))
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div className="alert alert-info" style={{ margin: 0 }}>
-                        <Info className="w-5 h-5 shrink-0 text-sky-400" />
-                        <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
-                          Đăng nhập bằng tài khoản cổng sinh viên UTH để SmartEnroll tự động nạp cấu hình và duy trì phiên hoạt động liên tục.
-                        </div>
-                      </div>
-                      
-                      <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                        <div className="form-group" style={{ margin: 0 }}>
-                          <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Mã số sinh viên (MSSV)</label>
-                          <input 
-                            type="text" 
-                            value={username} 
-                            onChange={(e) => setUsername(e.target.value)} 
-                            placeholder="Nhập MSSV..." 
-                            className="text-input" 
-                            style={{ padding: '8px 12px' }}
-                            required
-                          />
-                        </div>
-                        <div className="form-group" style={{ margin: 0 }}>
-                          <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Mật khẩu cổng UTH</label>
-                          <div style={{ position: 'relative' }}>
-                            <input 
-                              type={showPassword ? "text" : "password"} 
-                              value={password} 
-                              onChange={(e) => setPassword(e.target.value)} 
-                              placeholder="Nhập mật khẩu..." 
-                              className="text-input" 
-                              style={{ padding: '8px 40px 8px 12px', width: '100%' }}
-                              required
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              style={{
-                                position: 'absolute',
-                                right: '12px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'none',
-                                border: 'none',
-                                padding: 0,
-                                color: 'rgba(255, 255, 255, 0.4)',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center'
-                              }}
-                            >
-                              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                        </div>
-                        {loginError && (
-                          <div style={{ color: '#fb7185', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <AlertCircle className="w-4 h-4 shrink-0" />
-                            {loginError}
-                          </div>
-                        )}
-                        <button 
-                          type="submit" 
-                          disabled={loginLoading} 
-                          className="btn btn-primary" 
-                          style={{ width: '100%', marginTop: '4px', display: 'flex', justifyContent: 'center' }}
-                        >
-                          {loginLoading ? 'ĐANG ĐĂNG NHẬP...' : 'ĐĂNG NHẬP CỔNG TRƯỜNG'}
-                        </button>
-                      </form>
-                    </div>
+                    <div className="menu-empty">{coursesLoading ? 'Đang tải danh sách môn…' : 'Không tìm thấy môn nào'}</div>
                   )}
+                </div>
+              </motion.div>
+            )}
+            </AnimatePresence>
+          </div>
 
-                  {/* AUTO CONFIG LOGIC */}
-                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '16px', marginTop: '4px' }}>
-                    {!configExists && (
-                      <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.4)', marginBottom: '8px', textAlign: 'center', letterSpacing: '0.5px' }}>
-                        — HOẶC DÙNG DỰ PHÒNG CHROME —
-                      </div>
-                    )}
+          <div className="topbar-right">
+            <span className={`status-chip ${status.cls}`}>
+              <span className="dot" />
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.span
+                  key={status.text}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.16 }}
+                >
+                  {status.text}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+            <div className="user">
+              <div className="user-text">
+                <div className="user-name">{config?.username || 'Khách'}</div>
+                <div className="user-sub">Sinh viên UTH</div>
+              </div>
+              <div className="avatar"><UserRound size={20} /></div>
+            </div>
+          </div>
+        </header>
+
+        {/* ===================================================== TAB: ĐĂNG KÝ */}
+        <AnimatePresence mode="wait">
+        {activeTab === 'enroll' && (
+          <motion.div key="enroll" className="dash-grid" {...tabAnim}>
+            <div className="col">
+              {/* HERO */}
+              <motion.section className="card hero" {...fadeUp(0)}>
+                <div>
+                  <h1>Xin chào{config?.username ? `, ${config.username}` : ''}.</h1>
+                  <motion.p key={status.cls} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+                    {heroText}
+                  </motion.p>
+                  {heroAction}
+                </div>
+                <div className="hero-art"><HeroArt /></div>
+              </motion.section>
+
+              {/* TÌM LỚP */}
+              <motion.section
+                ref={scannerRef}
+                className="card"
+                style={{ position: 'relative', zIndex: dropdownOpen ? 5 : 'auto' }}
+                {...fadeUp(0.05)}
+              >
+                <div className="card-head">
+                  <div>
+                    <h2 className="card-title">Tìm lớp học phần</h2>
+                    <p className="card-sub">Chọn đợt, loại đăng ký và môn học, rồi quét để xem lịch và sĩ số từng lớp.</p>
+                  </div>
+                </div>
+
+                <div className="stack">
+                  <div className="grid-2">
+                    <label className="field">
+                      <span className="label">Đợt học</span>
+                      <select
+                        className="select"
+                        value={selectedDot}
+                        onChange={(e) => setSelectedDot(e.target.value)}
+                        disabled={!configExists}
+                      >
+                        {dots.length > 0 ? (
+                          dots.map(d => (
+                            <option key={d.id || d.idDot} value={d.id || d.idDot}>
+                              {d.tenHocKy || d.tenDot || d.id || d.idDot}
+                            </option>
+                          ))
+                        ) : (
+                          <option value={config?.id_dot || ''}>{config?.id_dot || '—'}</option>
+                        )}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span className="label">Loại đăng ký</span>
+                      <select className="select" value={regType} onChange={(e) => setRegType(e.target.value)}>
+                        <option value="new">Học mới</option>
+                        <option value="repeat">Học lại</option>
+                        <option value="improve">Học cải thiện</option>
+                        <option value="cond_new">Môn điều kiện (học mới)</option>
+                        <option value="cond_repeat">Môn điều kiện (học lại)</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="field combo">
+                    <span className="label">Môn học</span>
                     <button
-                      onClick={handleStartAutoConfig}
-                      disabled={isAutoRunning}
-                      className={configExists ? "btn btn-outline" : "btn btn-outline"}
-                      style={{ width: '100%', display: 'flex', justifyContent: 'center', gap: '8px' }}
+                      type="button"
+                      className="combo-trigger"
+                      onClick={() => setDropdownOpen(!dropdownOpen)}
+                      aria-expanded={dropdownOpen}
                     >
-                      <RefreshCw className={`w-4 h-4 ${isAutoRunning ? 'spin-loading' : ''}`} />
-                      {isAutoRunning ? 'ĐANG ĐỌC TỰ ĐỘNG CHROME...' : 'QUÉT TOKEN TỪ CHROME'}
+                      <span className={selectedCourse ? '' : 'placeholder'}>
+                        {selectedCourse
+                          ? (selectedCourseObj ? courseLabel(selectedCourseObj) : `[${selectedCourse}]`)
+                          : 'Chọn môn học'}
+                      </span>
+                      <ChevronDown size={16} />
                     </button>
 
-                    {/* Step guidance during auto retrieval */}
-                    {isAutoRunning && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        className="alert alert-info"
-                        style={{ marginTop: '14px', flexDirection: 'column' }}
-                      >
-                        <div style={{ fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}>
-                          <Info className="w-4 h-4 text-yellow-400 shrink-0" />
-                          Hướng dẫn bắt Token và ID Đợt:
+                    <AnimatePresence>
+                    {dropdownOpen && (
+                      <motion.div className="menu" {...menuAnim}>
+                        <div className="menu-search">
+                          <Search size={15} />
+                          <input
+                            type="text"
+                            value={courseSearch}
+                            onChange={(e) => setCourseSearch(e.target.value)}
+                            placeholder="Tìm theo mã hoặc tên môn…"
+                            autoFocus
+                          />
                         </div>
-                        <ol className="alert-steps" style={{ fontSize: '0.8rem', marginTop: '6px' }}>
-                          <li>Trình duyệt Chrome ẩn danh sẽ tự mở ra.</li>
-                          <li>Bạn vui lòng <span className="highlight">ĐĂNG NHẬP</span> tay vào portal.</li>
-                          <li>Hệ thống tự động quét Token, Đợt học và đóng trình duyệt.</li>
-                        </ol>
+                        <div className="menu-list">
+                          {coursesLoading ? (
+                            <div className="menu-empty">Đang tải danh sách môn…</div>
+                          ) : isTokenExpired ? (
+                            <div className="menu-empty error">Phiên đăng nhập hết hạn. Hãy đăng nhập lại.</div>
+                          ) : filteredCourses.length > 0 ? (
+                            filteredCourses.map((c, index) => (
+                              <button
+                                type="button"
+                                key={`${c.maHocPhan}-${index}`}
+                                className={`menu-item ${selectedCourse === c.maHocPhan ? 'selected' : ''}`}
+                                onClick={() => {
+                                  setSelectedCourse(c.maHocPhan);
+                                  setDropdownOpen(false);
+                                }}
+                              >
+                                <span>{courseLabel(c)}</span>
+                                {c.isBatBuoc && <span className="tag">Bắt buộc</span>}
+                              </button>
+                            ))
+                          ) : (
+                            <div className="menu-empty">Không tìm thấy môn nào</div>
+                          )}
+                        </div>
                       </motion.div>
                     )}
+                    </AnimatePresence>
+                  </div>
 
-                    {/* Feedback states */}
-                    {autoStatus === 'success' && !isAutoRunning && (
-                      <div className="alert alert-success" style={{ marginTop: '12px' }}>
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        Nạp Token từ Chrome thành công!
-                      </div>
-                    )}
-                    {autoStatus === 'failed' && !isAutoRunning && (
-                      <div className="alert alert-danger" style={{ marginTop: '12px' }}>
-                        <XCircle className="w-4 h-4 text-rose-400" />
-                        Không tìm thấy cấu hình. Hãy thử lại.
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.form 
-                  key="manual"
-                  onSubmit={handleSaveManualConfig}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
-                >
-                  <div className="form-group">
-                    <label className="input-label">Token Bearer</label>
-                    <input 
-                      type="text" 
-                      value={manToken} 
-                      onChange={(e) => setManToken(e.target.value)} 
-                      placeholder="Không cần chữ Bearer..."
-                      className="text-input"
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="input-label">Cookie</label>
-                    <input 
-                      type="text" 
-                      value={manCookie} 
-                      onChange={(e) => setManCookie(e.target.value)} 
-                      placeholder="Nhập chuỗi Cookie..."
-                      className="text-input"
-                      required
-                    />
-                  </div>
                   <div className="grid-2">
-                    <div className="form-group">
-                      <label className="input-label">Mã số sinh viên (MSSV)</label>
-                      <input 
-                        type="text" 
-                        value={username} 
-                        onChange={(e) => setUsername(e.target.value)} 
-                        placeholder="Không bắt buộc..." 
-                        className="text-input" 
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="input-label">Mật khẩu Portal UTH</label>
-                      <input 
-                        type="password" 
-                        value={password} 
-                        onChange={(e) => setPassword(e.target.value)} 
-                        placeholder="Không bắt buộc..." 
-                        className="text-input" 
-                      />
-                    </div>
+                    <label className="field">
+                      <span className="label">Thứ</span>
+                      <select className="select" value={filterThu} onChange={(e) => setFilterThu(e.target.value)}>
+                        <option value="Tất cả">Tất cả các ngày</option>
+                        <option value="Thứ 2">Thứ Hai</option>
+                        <option value="Thứ 3">Thứ Ba</option>
+                        <option value="Thứ 4">Thứ Tư</option>
+                        <option value="Thứ 5">Thứ Năm</option>
+                        <option value="Thứ 6">Thứ Sáu</option>
+                        <option value="Thứ 7">Thứ Bảy</option>
+                        <option value="Chủ nhật">Chủ nhật</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span className="label">Ca học</span>
+                      <select className="select" value={filterCa} onChange={(e) => setFilterCa(e.target.value)}>
+                        <option value="Tất cả">Tất cả các ca</option>
+                        <option value="Ca 1 (Tiết 1-3)">Ca 1 (tiết 1–3)</option>
+                        <option value="Ca 2 (Tiết 4-6)">Ca 2 (tiết 4–6)</option>
+                        <option value="Ca 3 (Tiết 7-9)">Ca 3 (tiết 7–9)</option>
+                        <option value="Ca 4 (Tiết 10-12)">Ca 4 (tiết 10–12)</option>
+                        <option value="Ca 5 (Tiết 13-15)">Ca 5 (tiết 13–15)</option>
+                      </select>
+                    </label>
                   </div>
-                  
-                  <div className="grid-2" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px', marginTop: '4px' }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="input-label">Tài khoản Facebook (Email/SĐT)</label>
-                      <input 
-                        type="text" 
-                        value={fbUsername} 
-                        onChange={(e) => setFbUsername(e.target.value)} 
-                        placeholder="Để tự động login FB..." 
-                        className="text-input" 
+
+                  <button
+                    type="button"
+                    className="btn btn-dark btn-block"
+                    onClick={handleScanClasses}
+                    disabled={isScanning || !configExists}
+                  >
+                    {isScanning ? <RefreshCw size={16} className="spin" /> : <Search size={16} />}
+                    {isScanning ? 'Đang quét chi tiết lớp…' : 'Quét chi tiết lớp học phần'}
+                  </button>
+                </div>
+              </motion.section>
+
+              {/* KẾT QUẢ QUÉT */}
+              <motion.section ref={resultsRef} className="card" {...fadeUp(0.1)}>
+                <div className="card-head">
+                  <div>
+                    <h2 className="card-title">Kết quả quét</h2>
+                    <p className="card-sub">
+                      {classes.length > 0
+                        ? `${visibleClasses.length} lớp${hiddenConflicts > 0 ? `, đang ẩn ${hiddenConflicts} lớp trùng lịch` : ''}. Chọn tối đa 1 lớp cho mỗi môn.`
+                        : 'Chọn môn ở trên rồi bấm quét để xem danh sách lớp.'}
+                    </p>
+                  </div>
+                  <div className="head-actions">
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={hideConflicting}
+                        onChange={(e) => setHideConflicting(e.target.checked)}
                       />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="input-label">Mật khẩu Facebook</label>
-                      <div style={{ position: 'relative' }}>
-                        <input 
-                          type={showFbPassword ? "text" : "password"} 
-                          value={fbPassword} 
-                          onChange={(e) => setFbPassword(e.target.value)} 
-                          placeholder="Để tự động login FB..." 
-                          className="text-input"
-                          style={{ paddingRight: '40px', width: '100%' }}
-                        />
-                        <button
+                      Ẩn lớp trùng lịch
+                    </label>
+                    {checkedClasses.length > 0 && (
+                      <button type="button" className="btn btn-light btn-sm" onClick={handleClearSelection}>
+                        <Trash2 size={13} />
+                        Bỏ chọn ({checkedClasses.length})
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {isScanning ? (
+                  <div className="class-grid" aria-busy="true" aria-label="Đang quét lớp">
+                    {[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="skeleton" />)}
+                  </div>
+                ) : visibleClasses.length > 0 ? (
+                  <motion.div className="class-grid" layoutScroll>
+                    <AnimatePresence mode="popLayout">
+                    {visibleClasses.map((cls, idx) => {
+                      const isSelected = checkedClasses.some(c => c.id === cls.id);
+                      const isFull = String(cls.status || '').includes('FULL');
+                      return (
+                        <motion.button
                           type="button"
-                          onClick={() => setShowFbPassword(!showFbPassword)}
-                          style={{
-                            position: 'absolute',
-                            right: '12px',
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            background: 'none',
-                            border: 'none',
-                            padding: 0,
-                            color: 'rgba(255, 255, 255, 0.4)',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center'
+                          key={cls.id}
+                          layout
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{
+                            opacity: cls.is_conflicting && !isSelected ? 0.55 : 1,
+                            y: 0,
+                            transition: { duration: 0.35, ease: easeOut, delay: Math.min(idx, 12) * 0.03 }
                           }}
+                          exit={{ opacity: 0, scale: 0.94, pointerEvents: 'none', transition: { duration: 0.18 } }}
+                          whileHover={{ y: -3, transition: { duration: 0.18 } }}
+                          whileTap={{ scale: 0.98, transition: { duration: 0.1 } }}
+                          transition={softSpring}
+                          className={`class-card ${isSelected ? 'selected' : ''} ${cls.is_conflicting ? 'conflict' : ''}`}
+                          onClick={() => handleToggleClass(cls)}
+                          aria-pressed={isSelected}
                         >
-                          {showFbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </div>
+                          <span className="class-top">
+                            <span className="class-code">{cls.maLopHocPhan}</span>
+                            <span className="class-tick"><TickMark on={isSelected} /></span>
+                          </span>
+                          <span className="class-name">{cls.tenMonHoc}</span>
+                          <span className="class-sched">{cls.schedule}</span>
+                          {cls.is_conflicting && (
+                            <span className="conflict-note">Trùng lịch: {cls.conflict_with}</span>
+                          )}
+                          <span className="class-foot">
+                            <span className={`meter ${isFull ? 'full' : ''}`}>
+                              <motion.span
+                                initial={{ scaleX: 0 }}
+                                animate={{ scaleX: Math.min(Number(cls.capacity_percent) || 0, 100) / 100 }}
+                                transition={{ duration: 0.8, ease: easeOut, delay: 0.15 + Math.min(idx, 12) * 0.03 }}
+                              />
+                            </span>
+                            <span className={`pct ${isFull ? 'full' : ''}`}>
+                              {cls.capacity_percent}%{isFull ? ' · đầy' : ''}
+                            </span>
+                          </span>
+                        </motion.button>
+                      );
+                    })}
+                    </AnimatePresence>
+                  </motion.div>
+                ) : classes.length > 0 ? (
+                  <div className="empty">
+                    <Layers size={26} />
+                    Tất cả lớp đều trùng lịch với lớp bạn đã đăng ký. Bỏ tick “Ẩn lớp trùng lịch” để xem.
                   </div>
-                  <div className="grid-3">
-                    <div className="form-group">
-                      <label className="input-label">ID Đợt học</label>
-                      <input 
-                        type="text" 
-                        value={manIdDot} 
-                        onChange={(e) => setManIdDot(e.target.value)} 
-                        placeholder="76..." 
-                        className="text-input" 
-                        required
-                      />
-                    </div>
-                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                      <label className="input-label">User Agent</label>
-                      <input 
-                        type="text" 
-                        value={manUserAgent} 
-                        onChange={(e) => setManUserAgent(e.target.value)} 
-                        placeholder="Mozilla/5.0..." 
-                        className="text-input" 
-                        required
-                      />
-                    </div>
+                ) : (
+                  <div className="empty">
+                    <Layers size={26} />
+                    Chưa có lớp nào. Chọn môn học ở trên rồi bấm quét.
                   </div>
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                )}
+
+                <AnimatePresence>
+                {checkedClasses.length > 0 && (
+                  <motion.div
+                    className="chips-box"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    transition={{ duration: 0.22, ease: easeOut }}
+                  >
+                    <div className="chips-title">Đã chọn để spam ({checkedClasses.length})</div>
+                    <div className="chips">
+                      <AnimatePresence initial={false}>
+                      {checkedClasses.map(c => (
+                        <motion.span
+                          key={c.id}
+                          className="chip"
+                          layout
+                          initial={{ opacity: 0, scale: 0.85 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.85 }}
+                          transition={spring}
+                        >
+                          <span>{c.maLopHocPhan} · {c.tenMonHoc}</span>
+                          <button
+                            type="button"
+                            aria-label={`Bỏ chọn ${c.tenMonHoc}`}
+                            onClick={() => setCheckedClasses(checkedClasses.filter(x => x.id !== c.id))}
+                          >
+                            <X size={13} />
+                          </button>
+                        </motion.span>
+                      ))}
+                      </AnimatePresence>
+                    </div>
+                  </motion.div>
+                )}
+                </AnimatePresence>
+              </motion.section>
+
+              {/* TRÌNH ĐIỀU KHIỂN SPAM */}
+              <motion.section ref={consoleRef} className="card" {...fadeUp(0.15)}>
+                <div className="card-head">
+                  <div>
+                    <h2 className="card-title">Trình điều khiển spam</h2>
+                    <p className="card-sub">
+                      {spamMode === 'turbo'
+                        ? 'Turbo: 3 luồng cho mỗi lớp, tối đa 12 request cùng lúc.'
+                        : 'Thường: mỗi lớp gửi khoảng 1 request mỗi giây.'}
+                    </p>
+                  </div>
+                  <div className="seg" role="group" aria-label="Chế độ tốc độ">
                     <button
-                      type="submit"
-                      className="btn btn-secondary"
+                      type="button"
+                      className={spamMode === 'normal' ? 'on' : ''}
+                      onClick={() => setSpamMode('normal')}
+                      disabled={isSpamming}
+                      aria-pressed={spamMode === 'normal'}
                     >
-                      LƯU THỦ CÔNG
+                      Thường
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowManual(false)}
-                      className="btn btn-outline"
+                      className={spamMode === 'turbo' ? 'on' : ''}
+                      onClick={() => setSpamMode('turbo')}
+                      disabled={isSpamming}
+                      aria-pressed={spamMode === 'turbo'}
                     >
-                      HỦY
+                      Turbo
                     </button>
                   </div>
-                </motion.form>
-              )}
-            </AnimatePresence>
-          </motion.div>
-
-          {/* CLASS SCANNER CARD */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
-            className="card"
-            style={{ zIndex: dropdownOpen ? 10 : 1, position: 'relative' }}
-          >
-            <h2 className="card-title cyan" style={{ marginBottom: '20px' }}>
-              <Search className="w-5 h-5" />
-              1. Tìm kiếm lớp học phần
-            </h2>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Course Selection Dropdown with Search */}
-              <div className="form-group" style={{ position: 'relative', marginBottom: '0' }}>
-                <label className="input-label">Môn học cần đăng ký</label>
-                <div 
-                  className="custom-select-trigger"
-                  onClick={() => setDropdownOpen(!dropdownOpen)}
-                >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '90%' }}>
-                    {selectedCourse 
-                      ? courses.find(c => c.maHocPhan === selectedCourse)
-                        ? `[${selectedCourse}] ${courses.find(c => c.maHocPhan === selectedCourse).tenHocPhan || courses.find(c => c.maHocPhan === selectedCourse).tenMonHoc}`
-                        : `[${selectedCourse}]`
-                      : '--- Chọn môn học ---'}
-                  </span>
-                  <ChevronDown className="w-4 h-4 text-gray-400" />
                 </div>
 
-                {dropdownOpen && (
-                  <div className="dropdown-menu">
-                    <div className="dropdown-search-wrapper">
-                      <Search className="w-4 h-4 text-gray-400 shrink-0" />
-                      <input 
-                        type="text" 
-                        value={courseSearch}
-                        onChange={(e) => setCourseSearch(e.target.value)}
-                        placeholder="Tìm kiếm theo mã môn hoặc tên môn..."
-                        className="dropdown-search-input"
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </div>
-                    <div className="dropdown-list">
-                      {coursesLoading ? (
-                        <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Đang tải danh sách môn...</div>
-                      ) : isTokenExpired ? (
-                        <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--danger-hover)', fontWeight: '500' }}>
-                          ⚠️ Phiên đăng nhập hết hạn. Hãy bấm "Tự động lấy Token & id đợt"!
-                        </div>
-                      ) : filteredCourses.length > 0 ? (
-                        filteredCourses.map((c, index) => {
-                          const lbl = `[${c.maHocPhan}] ${c.tenHocPhan || c.tenMonHoc || ''}`;
-                          const isRequired = c.isBatBuoc;
-                          return (
-                            <div 
-                              key={index}
-                              onClick={() => {
-                                setSelectedCourse(c.maHocPhan);
-                                setDropdownOpen(false);
-                              }}
-                              className={`dropdown-item ${selectedCourse === c.maHocPhan ? 'selected' : ''}`}
-                            >
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%' }}>{lbl}</span>
-                              {isRequired && (
-                                <span style={{ background: 'rgba(244,63,94,0.15)', color: '#fda4af', border: '1px solid rgba(244,63,94,0.3)', padding: '2px 6px', borderRadius: '4px', fontSize: '8px', fontWeight: 'bold' }}>BẮT BUỘC</span>
-                              )}
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dark)' }}>Không tìm thấy môn nào</div>
-                      )}
-                    </div>
+                <div className="stat-row">
+                  <div className="mini-stat">
+                    <div className="k">Đã gửi</div>
+                    <div className="v"><AnimatedNumber value={spamStats.total_requests} /></div>
                   </div>
+                  <div className="mini-stat">
+                    <div className="k">Thành công</div>
+                    <div className="v green"><AnimatedNumber value={spamStats.success_count} /></div>
+                    {burstKey > 0 && <SuccessBurst key={burstKey} />}
+                  </div>
+                  <div className="mini-stat">
+                    <div className="k">Chưa được</div>
+                    <div className="v red"><AnimatedNumber value={spamStats.error_count} /></div>
+                  </div>
+                </div>
+                {(spamStats.timeouts > 0 || spamStats.relogins > 0) && (
+                  <p className="console-meta">
+                    Timeout: {spamStats.timeouts || 0} · Tự đăng nhập lại: {spamStats.relogins || 0}
+                  </p>
                 )}
-              </div>
 
-              {/* Filters */}
-              <div className="grid-2">
-                <div className="form-group" style={{ marginBottom: '0' }}>
-                  <label className="input-label">Lọc Thứ</label>
-                  <select 
-                    value={filterThu} 
-                    onChange={(e) => setFilterThu(e.target.value)}
-                    className="select-input"
-                  >
-                    <option value="Tất cả">Tất cả các ngày</option>
-                    <option value="Thứ 2">Thứ Hai</option>
-                    <option value="Thứ 3">Thứ Ba</option>
-                    <option value="Thứ 4">Thứ Tư</option>
-                    <option value="Thứ 5">Thứ Năm</option>
-                    <option value="Thứ 6">Thứ Sáu</option>
-                    <option value="Thứ 7">Thứ Bảy</option>
-                    <option value="Chủ nhật">Chủ nhật</option>
-                  </select>
+                <div className="terminal-wrap">
+                <AnimatePresence>
+                  {isSpamming && (
+                    <motion.span
+                      className="run-bar"
+                      aria-hidden="true"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                    />
+                  )}
+                </AnimatePresence>
+                <div className="terminal" ref={terminalEndRef} role="log" aria-live="polite">
+                  {logs.length > 0 ? (
+                    <AnimatePresence initial={false}>
+                      {keyedLogs.map(({ key, text }) => (
+                        <motion.div
+                          key={key}
+                          className={`t-line ${logTone(text)}`}
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ duration: 0.25, ease: 'easeOut' }}
+                        >
+                          {text}
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  ) : (
+                    <div className="t-empty">Nhật ký trống. Bấm chạy spam để bắt đầu.</div>
+                  )}
+                  {isSpamming && <div className="t-live">➤ Đang gửi liên tục…</div>}
                 </div>
-                <div className="form-group" style={{ marginBottom: '0' }}>
-                  <label className="input-label">Lọc Ca Học</label>
-                  <select 
-                    value={filterCa} 
-                    onChange={(e) => setFilterCa(e.target.value)}
-                    className="select-input"
-                  >
-                    <option value="Tất cả">Tất cả các ca</option>
-                    <option value="Ca 1 (Tiết 1-3)">Ca 1 (Tiết 1-3)</option>
-                    <option value="Ca 2 (Tiết 4-6)">Ca 2 (Tiết 4-6)</option>
-                    <option value="Ca 3 (Tiết 7-9)">Ca 3 (Tiết 7-9)</option>
-                    <option value="Ca 4 (Tiết 10-12)">Ca 4 (Tiết 10-12)</option>
-                    <option value="Ca 5 (Tiết 13-15)">Ca 5 (Tiết 13-15)</option>
-                  </select>
                 </div>
-              </div>
 
-              {/* Scan Button */}
-              <button
-                onClick={handleScanClasses}
-                disabled={isScanning || !configExists}
-                className="btn btn-secondary"
-                style={{ marginTop: '8px' }}
-              >
-                <Search className="w-4 h-4" />
-                {isScanning ? 'ĐANG QUÉT CHI TIẾT LỚP...' : 'QUÉT CHI TIẾT LỚP HỌC PHẦN'}
-              </button>
-            </div>
-          </motion.div>
-
-          {/* REGISTERED CLASSES CARD */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3 }}
-            className="card"
-            style={{ marginTop: '16px' }}
-          >
-            <div className="card-header" style={{ marginBottom: '14px' }}>
-              <h2 className="card-title purple">
-                <CheckSquare className="w-5 h-5" />
-                3. Học phần đã đăng ký thành công
-              </h2>
-              <button 
-                onClick={fetchRegisteredClasses}
-                disabled={registeredLoading || !configExists}
-                className="eye-button"
-                title="Tải lại danh sách lớp đã đăng ký"
-                style={{ padding: '6px' }}
-              >
-                <RefreshCw className={`w-4 h-4 ${registeredLoading ? 'spin-loading' : ''}`} />
-              </button>
+                <AnimatePresence mode="wait" initial={false}>
+                {!isSpamming ? (
+                  <motion.button
+                    key="start"
+                    type="button"
+                    className="btn btn-dark btn-lg btn-block"
+                    onClick={handleStartSpam}
+                    disabled={checkedClasses.length === 0}
+                    whileTap={{ scale: 0.985 }}
+                    {...swapAnim}
+                  >
+                    <Play size={17} />
+                    Chạy spam đăng ký ({checkedClasses.length} lớp)
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    key="stop"
+                    type="button"
+                    className="btn btn-danger btn-lg btn-block"
+                    onClick={handleStopSpam}
+                    whileTap={{ scale: 0.985 }}
+                    {...swapAnim}
+                  >
+                    <Square size={15} />
+                    Dừng spam
+                  </motion.button>
+                )}
+                </AnimatePresence>
+              </motion.section>
             </div>
 
-            <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+            {/* ---------------------------------------------------- RIGHT PANEL */}
+            <motion.aside className="side-panel" {...fadeUp(0.08)}>
+              <motion.button type="button" className="stat-card" onClick={() => scrollToRef(accountRef)} {...fadeUp(0.12)} whileHover={{ y: -2, transition: { duration: 0.15 } }} whileTap={{ scale: 0.98, transition: { duration: 0.1 } }}>
+                <span className={`stat-icon ${isTokenExpired || !configExists ? 'tone-red' : 'tone-orange'}`}>
+                  <KeyRound size={18} />
+                </span>
+                <span className="stat-body">
+                  <span className="stat-label">Phiên đăng nhập</span>
+                  <span className="stat-value">{!configExists ? 'Chưa có' : isTokenExpired ? 'Hết hạn' : 'Còn hạn'}</span>
+                  <span className="stat-sub">{tokenExpiresAt ? `đến ${formatExpiry(tokenExpiresAt)}` : 'Chưa rõ hạn'}</span>
+                </span>
+                <ChevronRight size={18} className="stat-chev" />
+              </motion.button>
+
+              <motion.button type="button" className="stat-card" onClick={() => scrollToRef(resultsRef)} {...fadeUp(0.18)} whileHover={{ y: -2, transition: { duration: 0.15 } }} whileTap={{ scale: 0.98, transition: { duration: 0.1 } }}>
+                <span className="stat-icon tone-lavender"><ListChecks size={18} /></span>
+                <span className="stat-body">
+                  <span className="stat-label">Lớp đã chọn để spam</span>
+                  <span className="stat-value"><AnimatedNumber value={checkedClasses.length} /></span>
+                  <span className="stat-sub">
+                    {checkedClasses.length > 0 ? checkedClasses.map(c => c.maLopHocPhan).join(', ') : 'Chưa chọn lớp nào'}
+                  </span>
+                </span>
+                <ChevronRight size={18} className="stat-chev" />
+              </motion.button>
+
+              <motion.button type="button" className="stat-card" onClick={() => scrollToRef(registeredRef)} {...fadeUp(0.24)} whileHover={{ y: -2, transition: { duration: 0.15 } }} whileTap={{ scale: 0.98, transition: { duration: 0.1 } }}>
+                <span className="stat-icon tone-green"><BadgeCheck size={18} /></span>
+                <span className="stat-body">
+                  <span className="stat-label">Đã đăng ký trong đợt</span>
+                  <span className="stat-value"><AnimatedNumber value={registeredClasses.length} /></span>
+                  <span className="stat-sub">{totalCredits} tín chỉ</span>
+                </span>
+                <ChevronRight size={18} className="stat-chev" />
+              </motion.button>
+
+              <div className="side-head" ref={registeredRef}>
+                <span className="side-title">Học phần đã đăng ký</span>
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={fetchRegisteredClasses}
+                  disabled={registeredLoading || !configExists}
+                >
+                  <RefreshCw size={13} className={registeredLoading ? 'spin' : ''} />
+                  Tải lại
+                </button>
+              </div>
+
               {registeredLoading ? (
-                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  Đang tải danh sách học phần đã đăng ký...
-                </div>
+                <div className="side-empty">Đang tải danh sách…</div>
               ) : registeredClasses.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="reg-list">
+                  <AnimatePresence initial={false}>
                   {registeredClasses.map((rc, idx) => {
                     const rcId = rc.id || rc.idDangKy;
                     const rcName = rc.tenLopHocPhan || rc.tenHocPhan || rc.tenMonHoc || 'Học phần';
                     const rcCode = rc.maLopHocPhan || rc.maHocPhan || '';
                     const rcCredits = rc.soTinChi || 0;
                     return (
-                      <div 
-                        key={idx} 
-                        style={{ 
-                          background: 'rgba(255, 255, 255, 0.02)', 
-                          border: '1px solid rgba(255, 255, 255, 0.05)', 
-                          borderRadius: '8px', 
-                          padding: '10px 14px', 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center',
-                          gap: '10px'
-                        }}
+                      <motion.div
+                        key={rcId || idx}
+                        className="reg-item"
+                        layout
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, x: 24 }}
+                        transition={softSpring}
                       >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
-                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {rcName}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            Mã lớp: {rcCode} ({rcCredits} TC)
-                          </span>
-                          {rc.scheduleText && (
-                            <span style={{ fontSize: '0.7rem', color: '#38bdf8', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              📅 {rc.scheduleText}
-                            </span>
-                          )}
+                        <div className="reg-text">
+                          <span className="reg-name" title={rcName}>{rcName}</span>
+                          <span className="reg-meta">{rcCode} · {rcCredits} TC</span>
+                          {rc.scheduleText && <span className="reg-sched" title={rc.scheduleText}>{rc.scheduleText}</span>}
                         </div>
-                        <button 
+                        <button
+                          type="button"
+                          className="btn btn-danger-soft btn-sm"
                           onClick={() => handleDeregisterClass(rcId, rcName, rc.isConditional)}
-                          className="btn btn-outline"
-                          style={{ 
-                            width: 'auto', 
-                            padding: '6px 12px', 
-                            fontSize: '0.75rem', 
-                            borderColor: 'rgba(244, 63, 94, 0.4)', 
-                            color: '#fb7185',
-                            background: 'rgba(244, 63, 94, 0.05)'
-                          }}
                         >
-                          Hủy đăng ký
+                          Hủy
                         </button>
-                      </div>
+                      </motion.div>
                     );
                   })}
+                  </AnimatePresence>
                 </div>
               ) : (
-                <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dark)', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                  Chưa có môn nào đã đăng ký trong đợt này.
-                </div>
+                <div className="side-empty">Chưa có môn nào trong đợt này.</div>
               )}
-            </div>
+
+              <div className="account" ref={accountRef}>
+                <div className="account-title">Tài khoản cổng trường</div>
+                {configExists ? (
+                  <>
+                    <div className="kv">
+                      <span className="k">MSSV</span>
+                      <span className="v">{config?.username || 'Lấy từ Chrome'}</span>
+                    </div>
+                    <div className="kv">
+                      <span className="k">Token</span>
+                      <span className="v">
+                        <span className="mask">{showToken ? config?.token : '••••••••••••'}</span>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => setShowToken(!showToken)}
+                          aria-label={showToken ? 'Ẩn token' : 'Hiện token'}
+                        >
+                          {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </span>
+                    </div>
+                    <div className="kv">
+                      <span className="k">Cookie</span>
+                      <span className="v">
+                        <span className="mask">{showCookie ? config?.cookie : '••••••••••••'}</span>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => setShowCookie(!showCookie)}
+                          aria-label={showCookie ? 'Ẩn cookie' : 'Hiện cookie'}
+                        >
+                          {showCookie ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </span>
+                    </div>
+                    <div className="kv">
+                      <span className="k">Hạn token</span>
+                      <span className={`v ${isTokenExpired ? 'bad' : ''}`}>
+                        {isTokenExpired ? 'Hết hạn' : tokenExpiresAt ? formatExpiry(tokenExpiresAt) : 'Không rõ'}
+                      </span>
+                    </div>
+                    <div className="kv">
+                      <span className="k">Cổng trường</span>
+                      <span className={`v ${tokenOk === false ? 'bad' : tokenOk ? 'ok' : ''}`}>{portalCheckText}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="notice notice-neutral">
+                    <Info size={15} />
+                    <span>Chưa đăng nhập. Đăng nhập để tool tự nạp token và giữ phiên.</span>
+                  </div>
+                )}
+
+                <div className="divider" />
+
+                <div className="account-actions">
+                  {!configExists && (
+                    <button type="button" className="btn btn-dark btn-block" onClick={() => setShowLoginOverlay(true)}>
+                      Đăng nhập
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-light btn-block"
+                    onClick={handleStartAutoConfig}
+                    disabled={isAutoRunning}
+                  >
+                    <RefreshCw size={14} className={isAutoRunning ? 'spin' : ''} />
+                    {isAutoRunning ? 'Đang chờ bạn đăng nhập trong Chrome…' : 'Lấy token qua Chrome'}
+                  </button>
+                  <button type="button" className="btn btn-light btn-block" onClick={() => setShowManual(true)}>
+                    <Settings size={14} />
+                    Nhập cấu hình thủ công
+                  </button>
+                  {renderAutoConfigStatus()}
+                  {configExists && (
+                    <button type="button" className="btn btn-danger-soft btn-block" onClick={handleLogout}>
+                      <LogOut size={14} />
+                      Đăng xuất
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.aside>
           </motion.div>
+        )}
 
-        </div>
-
-        {/* RIGHT COLUMN: SCAN RESULTS & SPAM CONSOLE */}
-        <div className="col-flex">
-          
-          {/* SCAN RESULTS TABLE */}
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="card"
-            style={{ display: 'flex', flexDirection: 'column', minHeight: '380px' }}
-          >
-            <div className="card-header" style={{ marginBottom: '10px' }}>
+        {/* =============================================== TAB: ĐIỂM RÈN LUYỆN */}
+        {activeTab === 'drl' && (
+          <motion.section key="drl" className="card" {...tabAnim}>
+            <div className="card-head">
               <div>
-                <h2 className="card-title cyan">
-                  <Layers className="w-5 h-5" />
-                  2. Kết quả quét lớp học phần
-                </h2>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  Tích chọn lớp để Spam. Chỉ được chọn tối đa 1 lớp cho mỗi môn học.
+                <h2 className="card-title">Điểm rèn luyện: chia sẻ thông báo UTH</h2>
+                <p className="card-sub">
+                  Chia sẻ thông báo, sự kiện của trường lên Facebook cá nhân để tích điểm rèn luyện.
+                  Ảnh chụp màn hình sau khi chia sẻ được lưu vào thư mục <strong>DRL</strong> làm minh chứng.
                 </p>
               </div>
-
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <input
-                    type="checkbox"
-                    checked={hideConflicting}
-                    onChange={(e) => setHideConflicting(e.target.checked)}
-                    style={{ cursor: 'pointer', margin: 0 }}
-                  />
-                  <span>Ẩn lớp trùng lịch</span>
-                </label>
-
-                {checkedClasses.length > 0 && (
-                  <button 
-                    onClick={handleClearSelection}
-                    className="btn btn-outline"
-                    style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem' }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Xóa chọn ({checkedClasses.length})
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="table-container" style={{ flex: '1', minHeight: '220px' }}>
-              {isScanning ? (
-                <div style={{ height: '220px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', color: 'var(--text-muted)' }}>
-                  <div className="spin-loading">
-                    <RefreshCw className="w-8 h-8 text-cyan-400" />
-                  </div>
-                  <span style={{ fontSize: '0.8rem' }} className="pulse-indicator">Hệ thống đang truy quét thông tin sĩ số và lịch học...</span>
-                </div>
-              ) : classes.length > 0 ? (
-                <div style={{ overflowX: 'auto', maxHeight: '340px' }}>
-                  <table className="custom-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: '50px', textAlign: 'center' }}>Chọn</th>
-                        <th style={{ width: '110px' }}>Mã Lớp</th>
-                        <th>Tên Môn Học</th>
-                        <th>Lịch Học Chi Tiết</th>
-                        <th style={{ width: '110px', textAlign: 'center' }}>Sĩ số (%)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <AnimatePresence>
-                        {classes.filter(cls => !hideConflicting || !cls.is_conflicting).map((cls, idx) => {
-                          const isSelected = checkedClasses.some(c => c.id === cls.id);
-                          return (
-                            <motion.tr 
-                              key={cls.id}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0 }}
-                              transition={{ delay: idx * 0.02 }}
-                              onClick={() => handleToggleClass(cls)}
-                              className={`${isSelected ? 'selected' : ''}`}
-                              style={{ opacity: cls.is_conflicting ? 0.6 : 1 }}
-                            >
-                              <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                                <input 
-                                  type="checkbox" 
-                                  checked={isSelected}
-                                  onChange={() => handleToggleClass(cls)}
-                                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                                />
-                              </td>
-                              <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: '600' }}>{cls.maLopHocPhan}</td>
-                              <td style={{ fontWeight: '600' }}>{cls.tenMonHoc}</td>
-                              <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                <div>{cls.schedule}</div>
-                                {cls.is_conflicting && (
-                                  <div style={{ color: '#f43f5e', fontSize: '0.7rem', marginTop: '3px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                    ⚠️ Trùng: {cls.conflict_with}
-                                  </div>
-                                )}
-                              </td>
-                              <td>
-                                <div className="progress-container">
-                                  <span className={`percent-text ${cls.status.includes("FULL") ? 'full' : 'available'}`}>
-                                    {cls.status}
-                                  </span>
-                                  <div className="progress-bar-bg">
-                                    <div 
-                                      className={`progress-bar-fill ${cls.status.includes("FULL") ? 'full' : 'available'}`}
-                                      style={{ width: `${Math.min(cls.capacity_percent, 100)}%` }}
-                                    ></div>
-                                  </div>
-                                </div>
-                              </td>
-                            </motion.tr>
-                          );
-                        })}
-                      </AnimatePresence>
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ height: '220px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dark)', gap: '8px' }}>
-                  <HelpCircle className="w-8 h-8" />
-                  <span style={{ fontSize: '0.8rem' }}>Không có lớp học phần nào để hiển thị. Hãy thực hiện Quét Chi Tiết.</span>
-                </div>
-              )}
-            </div>
-
-            {/* Checked Classes list preview */}
-            {checkedClasses.length > 0 && (
-              <div className="selection-preview-box">
-                <div className="selection-preview-title">
-                  <CheckSquare className="w-3.5 h-3.5" />
-                  Lớp đã chọn để Spam ({checkedClasses.length}):
-                </div>
-                <div className="badge-list">
-                  {checkedClasses.map(c => (
-                    <div key={c.id} className="selected-badge">
-                      <span>[{c.maLopHocPhan}] {c.tenMonHoc}</span>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCheckedClasses(checkedClasses.filter(x => x.id !== c.id));
-                        }}
-                        className="selected-badge-close"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </motion.div>
-
-          {/* SPAM ACTION PANEL */}
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
-            className="card"
-          >
-            <div className="card-header" style={{ marginBottom: '16px' }}>
-              <h2 className="card-title rose">
-                <Terminal className="w-5 h-5" />
-                4. Trình điều khiển Spam và Console log
-              </h2>
-              
-              {/* Stats tags */}
-              <div className="stats-bar">
-                <span className="stat-tag">
-                  Gửi: <strong>{spamStats.total_requests}</strong>
-                </span>
-                <span className="stat-tag success">
-                  Thành công: <strong>{spamStats.success_count}</strong>
-                </span>
-                <span className="stat-tag danger">
-                  Lỗi: <strong>{spamStats.error_count}</strong>
-                </span>
-              </div>
-            </div>
-
-            {/* Real-time console terminal */}
-            <div className="terminal-box">
-              {logs.length > 0 ? (
-                logs.map((log, index) => {
-                  let logClass = 'terminal-line';
-                  if (log.includes('THÀNH CÔNG') || log.includes('🎉')) logClass += ' success';
-                  if (log.includes('Lỗi') || log.includes('❌') || log.includes('💀')) logClass += ' danger';
-                  if (log.includes('⚠️')) logClass += ' warning';
-                  if (log.includes('ℹ️')) logClass += ' info';
-                  return (
-                    <div key={index} className={logClass}>
-                      {log}
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="terminal-empty">
-                  Nhật ký hoạt động trống. Nhấn Bắt đầu Spam để hiển thị.
-                </div>
-              )}
-              {isSpamming && (
-                <div className="terminal-pulse">
-                  ➤ Đang rà soát và spam liên tục...<span className="cursor-blink">|</span>
-                </div>
-              )}
-              <div ref={terminalEndRef} />
-            </div>
-
-            {/* Speed Mode Selector */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.02)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', marginBottom: '14px' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Chế độ Tốc độ:</span>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  onClick={() => setSpamMode('normal')}
-                  disabled={isSpamming}
-                  className="btn"
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '0.75rem',
-                    minHeight: 'auto',
-                    background: spamMode === 'normal' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                    border: spamMode === 'normal' ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
-                    color: spamMode === 'normal' ? '#38bdf8' : 'rgba(255,255,255,0.6)',
-                    cursor: isSpamming ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  ⚡ Thường (An toàn)
-                </button>
-                <button
-                  onClick={() => setSpamMode('turbo')}
-                  disabled={isSpamming}
-                  className="btn"
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '0.75rem',
-                    minHeight: 'auto',
-                    background: spamMode === 'turbo' ? 'rgba(244, 63, 94, 0.2)' : 'transparent',
-                    border: spamMode === 'turbo' ? '1px solid #f43f5e' : '1px solid rgba(255,255,255,0.1)',
-                    color: spamMode === 'turbo' ? '#f43f5e' : 'rgba(255,255,255,0.6)',
-                    cursor: isSpamming ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  🚀 Turbo (Gửi song song)
-                </button>
-              </div>
-            </div>
-
-            {/* Play / Stop Action Button */}
-            <div>
-              {!isSpamming ? (
-                <button
-                  onClick={handleStartSpam}
-                  disabled={checkedClasses.length === 0}
-                  className="btn btn-danger"
-                  style={{ padding: '16px', fontSize: '1rem' }}
-                >
-                  <Play className="w-5 h-5 fill-current" />
-                  CHẠY SPAM ĐĂNG KÝ ({checkedClasses.length} LỚP)
-                </button>
-              ) : (
-                <button
-                  onClick={handleStopSpam}
-                  className="btn btn-secondary"
-                  style={{ padding: '16px', fontSize: '1rem', background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)', boxShadow: '0 4px 15px rgba(217, 119, 6, 0.3)' }}
-                >
-                  <Square className="w-5 h-5 fill-current" />
-                  DỪNG SPAM ĐĂNG KÝ
-                </button>
-              )}
-            </div>
-          </motion.div>
-
-        </div>
-
-      </div>
-
-      {/* 📋 TABS VIEW: FACEBOOK SHARE DRL */}
-      {activeTab === 'drl' && (
-        <div className="col-flex" style={{ width: '100%', gap: '20px', marginTop: '10px', padding: '0 20px' }}>
-          <motion.div 
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="card"
-            style={{ width: '100%', minHeight: '500px' }}
-          >
-            <div className="card-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 className="card-title cyan">
-                <Share2 className="w-5 h-5" />
-                Tự động Chia sẻ thông báo UTH & Lưu minh chứng (DRL)
-              </h2>
               <button
+                type="button"
+                className="link-btn"
                 onClick={fetchAnnouncements}
                 disabled={announcementsLoading || !configExists}
-                className="eye-button"
-                title="Tải lại danh sách thông báo"
-                style={{ padding: '8px' }}
               >
-                <RefreshCw className={`w-4 h-4 ${announcementsLoading ? 'spin-loading' : ''}`} />
+                <RefreshCw size={13} className={announcementsLoading ? 'spin' : ''} />
+                Tải lại
               </button>
             </div>
 
-            <div className="alert alert-info" style={{ marginBottom: '20px' }}>
-              <Info className="w-5 h-5 shrink-0 text-sky-400" />
-              <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
-                Hệ thống tự động quét danh sách thông báo tuyển sinh, sự kiện, học bổng từ cổng thông tin UTH. 
-                Bạn có thể bấm chia sẻ trực tiếp lên trang cá nhân Facebook để tích lũy Điểm rèn luyện (DRL), ảnh chụp màn hình sau khi share thành công sẽ được lưu trữ tự động trong folder <strong>"DRL"</strong>.
-              </div>
-            </div>
-
             {(!config?.fb_username || editFbLogin) ? (
-              <div style={{ maxWidth: '440px', margin: '30px auto', width: '100%' }}>
-                <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-                  <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#fff', marginBottom: '8px' }}>Cấu hình tài khoản Facebook</h3>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                    Nhập tài khoản để bot tự động đăng nhập và chia sẻ bài viết lên dòng thời gian của bạn để tích lũy DRL.
-                  </p>
+              <form className="stack narrow" onSubmit={handleSaveFacebookCredentials}>
+                <div>
+                  <h3 className="card-title">Kết nối Facebook</h3>
+                  <p className="card-sub">Bot dùng tài khoản này để tự đăng nhập và chia sẻ bài lên dòng thời gian của bạn.</p>
                 </div>
-                
-                <form onSubmit={handleSaveFacebookCredentials} style={{ display: 'flex', flexDirection: 'column', gap: '18px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', padding: '24px', borderRadius: '16px' }}>
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Tài khoản Facebook (Email hoặc SĐT)</label>
-                    <input 
-                      type="text"
-                      value={fbUsername}
-                      onChange={(e) => setFbUsername(e.target.value)}
-                      placeholder="Nhập email hoặc số điện thoại..."
-                      className="text-input"
+                <label className="field">
+                  <span className="label">Email hoặc số điện thoại Facebook</span>
+                  <input
+                    type="text"
+                    className="input"
+                    value={fbUsername}
+                    onChange={(e) => setFbUsername(e.target.value)}
+                    placeholder="Nhập email hoặc số điện thoại"
+                    autoComplete="username"
+                    required
+                  />
+                </label>
+                <div className="field">
+                  <label className="label" htmlFor="fb-pass">Mật khẩu Facebook</label>
+                  <div className="input-wrap">
+                    <input
+                      id="fb-pass"
+                      type={showFbPassword ? 'text' : 'password'}
+                      className="input"
+                      value={fbPassword}
+                      onChange={(e) => setFbPassword(e.target.value)}
+                      placeholder="Nhập mật khẩu Facebook"
+                      autoComplete="current-password"
                       required
                     />
-                  </div>
-                  
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Mật khẩu Facebook</label>
-                    <div style={{ position: 'relative' }}>
-                      <input 
-                        type={showFbPassword ? "text" : "password"}
-                        value={fbPassword}
-                        onChange={(e) => setFbPassword(e.target.value)}
-                        placeholder="Nhập mật khẩu Facebook..."
-                        className="text-input"
-                        style={{ paddingRight: '40px', width: '100%' }}
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowFbPassword(!showFbPassword)}
-                        style={{
-                          position: 'absolute',
-                          right: '12px',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          background: 'none',
-                          border: 'none',
-                          padding: 0,
-                          color: 'rgba(255, 255, 255, 0.4)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center'
-                        }}
-                      >
-                        {showFbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                    <button type="submit" className="btn btn-secondary" style={{ flex: 1, display: 'flex', justifyContent: 'center', fontSize: '0.85rem', fontWeight: '600' }}>
-                      XÁC NHẬN KẾT NỐI
+                    <button
+                      type="button"
+                      className="input-eye"
+                      onClick={() => setShowFbPassword(!showFbPassword)}
+                      aria-label={showFbPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    >
+                      {showFbPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
-                    {config?.fb_username && (
-                      <button 
-                        type="button" 
-                        onClick={() => setEditFbLogin(false)} 
-                        className="btn btn-outline" 
-                        style={{ width: 'auto', padding: '10px 16px', fontSize: '0.85rem' }}
-                      >
-                        HỦY
-                      </button>
-                    )}
                   </div>
-                </form>
-              </div>
+                </div>
+                <div className="btn-row">
+                  {config?.fb_username && (
+                    <button type="button" className="btn btn-light" onClick={() => setEditFbLogin(false)}>Hủy</button>
+                  )}
+                  <button type="submit" className="btn btn-dark">Lưu tài khoản</button>
+                </div>
+              </form>
             ) : (
               <>
-                {/* Linked Account Status Row */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(56, 189, 248, 0.04)', border: '1px solid rgba(56, 189, 248, 0.1)', padding: '10px 16px', borderRadius: '8px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.825rem' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Đang liên kết tài khoản Facebook:</span>
-                    <strong style={{ color: '#38bdf8' }}>{config?.fb_username}</strong>
-                  </div>
-                  <button 
+                <div className="linked-row">
+                  <span><span className="muted">Đang liên kết Facebook: </span><strong>{config?.fb_username}</strong></span>
+                  <button
+                    type="button"
+                    className="btn btn-light btn-sm"
                     onClick={() => {
                       setFbUsername(config?.fb_username || '');
                       setFbPassword(config?.fb_password || '');
                       setEditFbLogin(true);
                     }}
-                    className="btn btn-outline"
-                    style={{ minHeight: 'auto', padding: '6px 14px', fontSize: '0.75rem', width: 'auto', borderColor: 'rgba(255,255,255,0.08)' }}
                   >
-                    Thay đổi tài khoản
+                    Đổi tài khoản
                   </button>
                 </div>
 
                 {announcementsLoading ? (
-                  <div style={{ padding: '60px 0', textAlign: 'center', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                    Đang quét cổng thông tin trường UTH và đồng bộ danh sách sự kiện... Vui lòng đợi trong giây lát...
+                  <div className="empty">
+                    <RefreshCw size={22} className="spin" />
+                    Đang tải thông báo từ cổng trường…
                   </div>
                 ) : announcements.length > 0 ? (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="scan-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <div className="table-wrap">
+                    <table className="table">
                       <thead>
                         <tr>
-                          <th style={{ textAlign: 'left', width: '8%' }}>ID</th>
-                          <th style={{ textAlign: 'left', width: '55%' }}>Tiêu đề sự kiện</th>
-                          <th style={{ textAlign: 'center', width: '15%' }}>Trạng thái</th>
-                          <th style={{ textAlign: 'center', width: '22%' }}>Thao tác</th>
+                          <th style={{ width: '9%' }}>ID</th>
+                          <th>Thông báo</th>
+                          <th style={{ width: '15%' }}>Trạng thái</th>
+                          <th style={{ width: '24%', textAlign: 'right' }}>Thao tác</th>
                         </tr>
                       </thead>
                       <tbody>
                         {announcements.map((item, idx) => (
-                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                            <td style={{ fontWeight: 'bold', color: 'rgba(255,255,255,0.4)', padding: '14px 10px' }}>#{item.id}</td>
-                            <td style={{ color: 'var(--text-main)', fontWeight: '500', padding: '14px 10px' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <span>{item.title}</span>
-                                <a 
-                                  href={item.link} 
-                                  target="_blank" 
-                                  rel="noreferrer" 
-                                  style={{ color: '#38bdf8', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}
-                                >
-                                  <ExternalLink className="w-3 h-3" />
-                                  Xem liên kết cổng trường
-                                </a>
-                              </div>
+                          <tr key={idx}>
+                            <td className="muted mono">#{item.id}</td>
+                            <td>
+                              <div className="cell-title">{item.title}</div>
+                              <a className="text-link" href={item.link} target="_blank" rel="noreferrer">
+                                <ExternalLink size={12} />
+                                Mở trên cổng trường
+                              </a>
                             </td>
-                            <td style={{ textAlign: 'center', padding: '14px 10px' }}>
+                            <td>
                               {item.status === 'shared' ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '4px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                                  <Check className="w-3.5 h-3.5" />
-                                  Đã chia sẻ
-                                </span>
+                                <span className="pill pill-green"><Check size={12} />Đã chia sẻ</span>
                               ) : (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255, 255, 255, 0.05)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '500' }}>
-                                  Chưa chia sẻ
-                                </span>
+                                <span className="pill pill-grey">Chưa chia sẻ</span>
                               )}
                             </td>
-                            <td style={{ textAlign: 'center', padding: '14px 10px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                            <td>
+                              <div className="cell-actions">
                                 <button
+                                  type="button"
+                                  className="btn btn-dark btn-sm"
                                   onClick={() => handleShareFacebook(item.id, item.title)}
                                   disabled={shareStatus === 'running'}
-                                  className="btn btn-outline"
-                                  style={{ 
-                                    padding: '6px 14px', 
-                                    fontSize: '0.75rem', 
-                                    minHeight: 'auto',
-                                    width: 'auto',
-                                    borderColor: 'rgba(56, 189, 248, 0.3)',
-                                    color: '#38bdf8',
-                                    background: 'rgba(56, 189, 248, 0.03)'
-                                  }}
                                 >
-                                  <Share2 className="w-3.5 h-3.5" />
-                                  Share FB
+                                  <Share2 size={13} />
+                                  Chia sẻ
                                 </button>
                                 {item.status === 'shared' && item.screenshot && (
-                                  <a
-                                    href={item.screenshot}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="btn btn-outline"
-                                    style={{ 
-                                      padding: '6px 14px', 
-                                      fontSize: '0.75rem', 
-                                      minHeight: 'auto',
-                                      width: 'auto',
-                                      borderColor: 'rgba(168, 85, 247, 0.3)',
-                                      color: '#c084fc',
-                                      background: 'rgba(168, 85, 247, 0.03)',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      textDecoration: 'none'
-                                    }}
-                                  >
-                                    <Image className="w-3.5 h-3.5" />
+                                  <a className="btn btn-light btn-sm" href={item.screenshot} target="_blank" rel="noreferrer">
+                                    <ImageIcon size={13} />
                                     Minh chứng
                                   </a>
                                 )}
@@ -1886,366 +1912,360 @@ export default function App() {
                     </table>
                   </div>
                 ) : (
-                  <div style={{ padding: '60px 0', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-dark)', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '12px' }}>
-                    Không tìm thấy sự kiện nào trên cổng thông tin trường UTH.
+                  <div className="empty">
+                    <Share2 size={26} />
+                    Không tìm thấy thông báo nào trên cổng trường.
                   </div>
                 )}
               </>
             )}
-          </motion.div>
-        </div>
-      )}
+          </motion.section>
+        )}
+        </AnimatePresence>
+      </main>
 
-      {/* 🖥️ REAL-TIME SHARE OVERLAY MODAL */}
-      {showShareModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(5, 3, 15, 0.85)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 10000,
-          padding: '20px'
-        }}>
+      {/* ---------------------------------------------------- MANUAL CONFIG MODAL */}
+      <AnimatePresence>
+        {showManual && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            style={{
-              background: 'rgba(23, 20, 41, 0.95)',
-              border: '1px solid rgba(56, 189, 248, 0.2)',
-              borderRadius: '20px',
-              padding: '28px',
-              maxWidth: '520px',
-              width: '100%',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
-            }}
+            className="backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setShowManual(false); }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-              <div style={{ 
-                width: '40px', 
-                height: '40px', 
-                borderRadius: '10px', 
-                background: 'rgba(14, 165, 233, 0.1)', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center' 
-              }}>
-                <Share2 className="w-5 h-5 text-sky-400" />
+            <motion.form
+              className="modal modal-wide"
+              onSubmit={handleSaveManualConfig}
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8 }}
+            >
+              <div className="modal-head">
+                <div className="modal-icon tone-orange"><Settings size={20} /></div>
+                <div>
+                  <h3>Cấu hình thủ công</h3>
+                  <p className="modal-sub">Dán token và cookie lấy từ trình duyệt khi không đăng nhập được bằng mật khẩu.</p>
+                </div>
               </div>
+
+              <div className="stack">
+                <label className="field">
+                  <span className="label">Token Bearer</span>
+                  <input className="input" type="text" value={manToken} onChange={(e) => setManToken(e.target.value)} placeholder="Không cần chữ Bearer" required />
+                </label>
+                <label className="field">
+                  <span className="label">Cookie</span>
+                  <input className="input" type="text" value={manCookie} onChange={(e) => setManCookie(e.target.value)} placeholder="Chuỗi cookie của portal" required />
+                </label>
+                <div className="grid-2">
+                  <label className="field">
+                    <span className="label">MSSV (không bắt buộc)</span>
+                    <input className="input" type="text" value={username} onChange={(e) => setUsername(e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span className="label">Mật khẩu portal (không bắt buộc)</span>
+                    <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                  </label>
+                </div>
+                <div className="grid-2">
+                  <label className="field">
+                    <span className="label">Tài khoản Facebook</span>
+                    <input className="input" type="text" value={fbUsername} onChange={(e) => setFbUsername(e.target.value)} placeholder="Để tự đăng nhập Facebook" />
+                  </label>
+                  <div className="field">
+                    <label className="label" htmlFor="man-fb-pass">Mật khẩu Facebook</label>
+                    <div className="input-wrap">
+                      <input
+                        id="man-fb-pass"
+                        className="input"
+                        type={showFbPassword ? 'text' : 'password'}
+                        value={fbPassword}
+                        onChange={(e) => setFbPassword(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="input-eye"
+                        onClick={() => setShowFbPassword(!showFbPassword)}
+                        aria-label={showFbPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                      >
+                        {showFbPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid-2">
+                  <label className="field">
+                    <span className="label">ID đợt học</span>
+                    <input className="input" type="text" value={manIdDot} onChange={(e) => setManIdDot(e.target.value)} placeholder="76" required />
+                  </label>
+                  <label className="field">
+                    <span className="label">User agent</span>
+                    <input className="input" type="text" value={manUserAgent} onChange={(e) => setManUserAgent(e.target.value)} required />
+                  </label>
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button type="button" className="btn btn-light" onClick={() => setShowManual(false)}>Hủy</button>
+                <button type="submit" className="btn btn-dark">Lưu cấu hình</button>
+              </div>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ---------------------------------------------------- FACEBOOK SHARE PROGRESS */}
+      <AnimatePresence>
+      {showShareModal && (
+        <motion.div className="backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div
+            className="modal modal-wide"
+            initial={{ opacity: 0, y: 16, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={softSpring}
+          >
+            <div className="modal-head">
+              <div className="modal-icon tone-lavender"><Share2 size={20} /></div>
               <div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '700', color: '#fff' }}>Tiến trình tự động đăng bài Facebook</h3>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Selenium Automation Runner</p>
+                <h3>Đang chia sẻ lên Facebook</h3>
+                <p className="modal-sub">Trình duyệt tự động (Selenium)</p>
               </div>
             </div>
 
-            {/* Step Display */}
-            <div style={{ 
-              background: 'rgba(0, 0, 0, 0.3)', 
-              border: '1px solid rgba(255,255,255,0.05)', 
-              borderRadius: '10px', 
-              padding: '20px',
-              minHeight: '120px',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: '12px',
-              textAlign: 'center',
-              marginBottom: '20px'
-            }}>
-              {shareStatus === 'running' && (
-                <div className="spin-loading" style={{ width: '28px', height: '28px', border: '3px solid rgba(56, 189, 248, 0.2)', borderTopColor: '#38bdf8', borderRadius: '50%' }} />
-              )}
-              {shareStatus === 'success' && (
-                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-              )}
-              {shareStatus === 'error' && (
-                <XCircle className="w-8 h-8 text-rose-400" />
-              )}
-              
-              <div style={{ 
-                fontSize: '0.9rem', 
-                fontWeight: '600', 
-                color: shareStatus === 'error' ? '#fb7185' : '#e2e8f0',
-                lineHeight: '1.5'
-              }}>
-                {shareStep || 'Đang chuẩn bị tiến trình...'}
-              </div>
-
-              {shareError && (
-                <div style={{ fontSize: '0.8rem', color: '#fda4af', marginTop: '4px', background: 'rgba(244,63,94,0.08)', padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(244,63,94,0.15)' }}>
-                  Lỗi: {shareError}
-                </div>
-              )}
+            <div className="share-stage">
+              {shareStatus === 'running' && <div className="ring" />}
+              {shareStatus === 'success' && <CheckCircle2 size={30} className="ico-ok" />}
+              {shareStatus === 'error' && <XCircle size={30} className="ico-err" />}
+              <div>{shareStep || 'Đang chuẩn bị…'}</div>
+              {shareError && <div className="notice notice-err">Lỗi: {shareError}</div>}
             </div>
 
-            {/* Instruction Guidance for user when waiting for FB login */}
             {shareStep.includes('đăng nhập tài khoản Facebook') && (
-              <div className="alert alert-info" style={{ marginBottom: '20px', background: 'rgba(234, 179, 8, 0.1)', borderColor: 'rgba(234, 179, 8, 0.2)' }}>
-                <Info className="w-5 h-5 shrink-0 text-yellow-400" />
-                <div style={{ fontSize: '0.8rem', color: '#fef08a', lineHeight: '1.4' }}>
-                  <strong>LƯU Ý LẦN ĐẦU:</strong> Hãy nhìn xuống thanh Taskbar/Dock trên máy của bạn và bấm mở cửa sổ Chrome vừa hiện lên. Điền email/mật khẩu Facebook của bạn và đăng nhập. Sau khi bạn đăng nhập xong, bot sẽ tự phát hiện và hoàn thành nốt các bước còn lại!
-                </div>
+              <div className="notice notice-info mb">
+                <Info size={15} />
+                <span>
+                  <strong>Lần đầu dùng:</strong> mở cửa sổ Chrome vừa hiện trên thanh Taskbar/Dock, đăng nhập Facebook.
+                  Đăng nhập xong, bot tự phát hiện và làm nốt các bước còn lại.
+                </span>
               </div>
             )}
 
-            {/* Action buttons */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <div className="modal-actions end">
               <button
+                type="button"
+                className="btn btn-light"
                 onClick={() => setShowShareModal(false)}
                 disabled={shareStatus === 'running'}
-                className="btn btn-outline"
-                style={{ width: 'auto', padding: '8px 20px', fontSize: '0.85rem' }}
               >
-                Đóng cửa sổ
+                Đóng
               </button>
             </div>
           </motion.div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
-      {/* 🔐 SCREEN OVERLAY: LOGIN ON APP ENTRY */}
+      {/* ---------------------------------------------------- LOGIN SCREEN */}
+      <AnimatePresence>
       {showLoginOverlay && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'radial-gradient(circle at center, rgba(16, 12, 34, 0.98) 0%, rgba(5, 3, 15, 0.99) 100%)',
-          backdropFilter: 'blur(20px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '20px'
-        }}>
+        <motion.div
+          className="login-screen"
+          initial={{ opacity: 1 }}
+          exit={{ opacity: 0, pointerEvents: 'none', transition: { duration: 0.35, ease: 'easeOut' } }}
+        >
           <motion.div
-            initial={{ opacity: 0, y: 30, scale: 0.98 }}
+            className="login-card"
+            initial={{ opacity: 0, y: 24, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            style={{
-              background: 'rgba(23, 20, 41, 0.75)',
-              border: '1px solid rgba(56, 189, 248, 0.15)',
-              borderRadius: '24px',
-              padding: '36px',
-              maxWidth: '460px',
-              width: '100%',
-              boxShadow: '0 30px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 40px rgba(14, 165, 233, 0.05)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
+            exit={{ opacity: 0, y: -16, scale: 0.98 }}
+            transition={softSpring}
           >
-            {/* Glowing background details */}
-            <div style={{ position: 'absolute', top: '-10%', left: '-10%', width: '150px', height: '150px', background: 'var(--accent-glow)', filter: 'blur(60px)', opacity: 0.2, pointerEvents: 'none' }}></div>
-            
-            <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-              <div style={{
-                width: '64px',
-                height: '64px',
-                borderRadius: '16px',
-                background: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 16px auto',
-                boxShadow: '0 8px 20px rgba(14, 165, 233, 0.3)'
-              }}>
-                <ShieldCheck className="w-8 h-8 text-white" />
+            <div className="login-brand">
+              <motion.div
+                className="login-logo"
+                initial={{ scale: 0, rotate: -40 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ ...spring, delay: 0.15 }}
+              >
+                <GraduationCap size={24} />
+              </motion.div>
+              <div>
+                <h1>SmartEnroll UTH</h1>
+                <p className="login-sub">Đăng ký học phần tự động cho sinh viên UTH</p>
               </div>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: '800', background: 'linear-gradient(135deg, #fff 0%, #cbd5e1 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '6px' }}>
-                SmartEnroll UTH
-              </h1>
-              <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
-                Công cụ hỗ trợ đăng ký học phần tối ưu & thông minh
-              </p>
             </div>
-            
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Mã số sinh viên (MSSV)</label>
-                <input 
-                  type="text" 
-                  value={username} 
-                  onChange={(e) => setUsername(e.target.value)} 
-                  placeholder="Nhập MSSV..." 
-                  className="text-input" 
-                  style={{ padding: '12px 14px', fontSize: '0.9rem' }}
+
+            <form className="stack" onSubmit={handleLogin}>
+              <label className="field">
+                <span className="label">Mã số sinh viên</span>
+                <input
+                  type="text"
+                  className="input"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Nhập MSSV"
+                  autoComplete="username"
                   required
                 />
-              </div>
-              
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="input-label" style={{ fontSize: '0.8rem', marginBottom: '6px' }}>Mật khẩu cổng UTH</label>
-                <div style={{ position: 'relative' }}>
-                  <input 
-                    type={showPassword ? "text" : "password"} 
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)} 
-                    placeholder="Nhập mật khẩu..." 
-                    className="text-input" 
-                    style={{ padding: '12px 42px 12px 14px', width: '100%', fontSize: '0.9rem' }}
+              </label>
+
+              <div className="field">
+                <label className="label" htmlFor="login-pass">Mật khẩu cổng UTH</label>
+                <div className="input-wrap">
+                  <input
+                    id="login-pass"
+                    type={showPassword ? 'text' : 'password'}
+                    className="input"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Nhập mật khẩu"
+                    autoComplete="current-password"
                     required
                   />
                   <button
                     type="button"
+                    className="input-eye"
                     onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      position: 'absolute',
-                      right: '14px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      color: 'rgba(255, 255, 255, 0.4)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center'
-                    }}
+                    aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
               </div>
-              
+
+              {configExists && tokenStillValid && !loginLoading && (
+                <div className="notice notice-ok">
+                  <CheckCircle2 size={15} />
+                  <span>
+                    Phiên đã lưu còn hạn đến <strong>{formatExpiry(tokenExpiresAt)}</strong>.
+                    Không cần đăng nhập lại, bấm <strong>Vào thẳng Dashboard</strong>.
+                  </span>
+                </div>
+              )}
+
+              {renderLoginProgress()}
+
               {loginError && (
-                <div style={{ color: '#fb7185', fontSize: '0.825rem', display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(244, 63, 94, 0.08)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(244, 63, 94, 0.15)' }}>
-                  <AlertCircle className="w-4 h-4 shrink-0" />
+                <div className="notice notice-err">
+                  <AlertCircle size={15} />
                   <span>{loginError}</span>
                 </div>
               )}
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
-                <button 
-                  type="submit" 
-                  disabled={loginLoading} 
-                  className="btn btn-primary" 
-                  style={{ width: '100%', padding: '12px', display: 'flex', justifyContent: 'center', fontSize: '0.9rem', fontWeight: '600' }}
+
+              <label className="check align-top">
+                <input
+                  type="checkbox"
+                  checked={autoRetryLogin}
+                  disabled={loginLoading}
+                  onChange={() => setAutoRetryLogin(!autoRetryLogin)}
+                />
+                <span>Tự động thử lại đến khi vào được (khi cổng trường nghẽn)</span>
+              </label>
+
+              <button
+                type="submit"
+                className={`btn btn-lg btn-block ${loginLoading ? 'btn-danger' : (configExists && tokenStillValid ? 'btn-light' : 'btn-dark')}`}
+              >
+                {loginLoading ? 'Đang đăng nhập… bấm để dừng' : 'Đăng nhập'}
+              </button>
+
+              {configExists && (
+                <button
+                  type="button"
+                  className={`btn btn-lg btn-block ${tokenStillValid && !loginLoading ? 'btn-dark' : 'btn-light'}`}
+                  onClick={() => setShowLoginOverlay(false)}
                 >
-                  {loginLoading ? 'ĐANG ĐĂNG NHẬP...' : 'XÁC NHẬN ĐĂNG NHẬP'}
+                  Vào thẳng Dashboard
                 </button>
-                
-                {configExists && (
-                  <button 
-                    type="button" 
-                    onClick={() => setShowLoginOverlay(false)} 
-                    className="btn btn-outline" 
-                    style={{ width: '100%', padding: '12px', fontSize: '0.85rem' }}
-                  >
-                    Bỏ qua & Vào thẳng Dashboard
-                  </button>
-                )}
+              )}
+
+              <div className="login-alt">
+                <button type="button" className="link-btn" onClick={handleStartAutoConfig} disabled={isAutoRunning}>
+                  {isAutoRunning ? 'Đang chờ bạn đăng nhập trong Chrome…' : 'Không đăng nhập được? Lấy token qua Chrome'}
+                </button>
               </div>
+              {renderAutoConfigStatus()}
             </form>
           </motion.div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
-      {/* 🔔 CUSTOM NOTIFICATION / CONFIRMATION DIALOG MODAL */}
+      {/* ---------------------------------------------------- ALERT / CONFIRM DIALOG */}
       <AnimatePresence>
         {customDialog && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(5, 3, 15, 0.85)',
-            backdropFilter: 'blur(12px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-            padding: '20px'
-          }}>
+          <motion.div
+            className="backdrop dialog-layer"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="modal modal-center"
+              role="alertdialog"
+              aria-modal="true"
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: -10 }}
-              style={{
-                background: 'rgba(23, 20, 41, 0.95)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '16px',
-                padding: '24px',
-                maxWidth: '440px',
-                width: '100%',
-                boxShadow: '0 20px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
-                textAlign: 'center'
-              }}
+              exit={{ opacity: 0, scale: 0.96, y: 6 }}
+              transition={spring}
             >
-              <div style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '12px',
-                background: customDialog.type === 'confirm' 
-                  ? 'rgba(56, 189, 248, 0.1)' 
-                  : (customDialog.status === 'success' ? 'rgba(52, 211, 153, 0.1)' : 'rgba(244, 63, 94, 0.1)'),
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 16px auto',
-                color: customDialog.type === 'confirm' 
-                  ? '#38bdf8' 
-                  : (customDialog.status === 'success' ? '#34d399' : '#fb7185')
-              }}>
-                {customDialog.type === 'confirm' ? (
-                  <HelpCircle className="w-6 h-6" />
-                ) : (
-                  customDialog.status === 'success' ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />
-                )}
+              <div className={`modal-icon ${customDialog.type === 'confirm' ? 'tone-lavender' : (customDialog.status === 'success' ? 'tone-green' : 'tone-red')}`}>
+                {customDialog.type === 'confirm'
+                  ? <HelpCircle size={22} />
+                  : (customDialog.status === 'success' ? <CheckCircle2 size={22} /> : <XCircle size={22} />)}
               </div>
-              
-              <h3 style={{
-                fontSize: '1.05rem',
-                fontWeight: '600',
-                color: '#fff',
-                marginBottom: '10px'
-              }}>
-                {customDialog.type === 'confirm' ? 'Xác nhận yêu cầu' : 'Thông báo hệ thống'}
-              </h3>
-              
-              <p style={{
-                fontSize: '0.875rem',
-                color: 'rgba(255,255,255,0.7)',
-                lineHeight: '1.5',
-                marginBottom: '24px'
-              }}>
-                {customDialog.message}
-              </p>
-              
-              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <h3>{customDialog.type === 'confirm' ? 'Xác nhận' : 'Thông báo'}</h3>
+              <p className="modal-text">{customDialog.message}</p>
+              <div className="modal-actions">
                 {customDialog.type === 'confirm' && (
                   <button
+                    type="button"
+                    className="btn btn-light"
                     onClick={() => {
                       customDialog.resolve(false);
                       setCustomDialog(null);
                     }}
-                    className="btn btn-outline"
-                    style={{ flex: 1, padding: '10px' }}
                   >
-                    Hủy bỏ
+                    Hủy
                   </button>
                 )}
                 <button
+                  type="button"
+                  className="btn btn-dark"
+                  autoFocus
                   onClick={() => {
                     customDialog.resolve(true);
                     setCustomDialog(null);
                   }}
-                  className="btn btn-primary"
-                  style={{ flex: 1, padding: '10px' }}
                 >
-                  Đồng ý
+                  {customDialog.type === 'confirm' ? 'Đồng ý' : 'Đã hiểu'}
                 </button>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ---------------------------------------------------- SUCCESS TOAST */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.id}
+            className="toast"
+            role="status"
+            initial={{ opacity: 0, y: 28, scale: 0.94 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 14, scale: 0.97 }}
+            transition={spring}
+          >
+            <span className="toast-icon"><BadgeCheck size={18} /></span>
+            {toast.text}
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
+    </MotionConfig>
   );
 }

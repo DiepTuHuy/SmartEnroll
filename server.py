@@ -49,6 +49,23 @@ if not os.path.exists(dist_folder):
 app = Flask(__name__, static_folder=dist_folder, static_url_path="/")
 CORS(app)  # Enable CORS for frontend
 
+import logging
+
+class _QuietPollingLog(logging.Filter):
+    """Ẩn log truy cập của các API mà giao diện hỏi liên tục (mỗi 1-30 giây).
+
+    Treo máy vài giờ chờ đăng ký sẽ tạo hàng nghìn dòng vô ích trên console.
+    Các request khác (đăng nhập, quét lớp, đăng ký...) vẫn được log bình thường.
+    """
+    NOISY = ('"GET /api/spam/status ', '"GET /api/config ', '"GET /api/config/login/status ',
+             '"GET /api/config/auto/status ', '"GET /api/share/status ')
+
+    def filter(self, record):
+        message = record.getMessage()
+        return not any(path in message for path in self.NOISY)
+
+logging.getLogger("werkzeug").addFilter(_QuietPollingLog())
+
 @app.after_request
 def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
@@ -97,7 +114,12 @@ def get_config():
     state.load_config_data()
     return jsonify({
         "config": state.config,
-        "exists": state.config is not None
+        "exists": state.config is not None,
+        # Token cổng trường sống 30 ngày: UI dùng để báo "không cần đăng nhập lại".
+        "token_expires_at": state.token_expires_at(),
+        # Kết quả hỏi cổng trường gần nhất (True/False/None) và thời điểm hỏi.
+        "token_ok": state.token_ok,
+        "token_checked_at": state.token_checked_at
     })
 
 @app.route('/api/config/manual', methods=['POST'])
@@ -119,35 +141,58 @@ def save_config_manual():
     }
     
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=4)
-        state.load_config_data()
+        state.save_config(config_data)
         return jsonify({"success": True, "message": "Lưu cấu hình thành công!"})
     except Exception as e:
         return jsonify({"success": False, "message": f"Không thể lưu cấu hình: {e}"}), 500
+
 @app.route('/api/config/login', methods=['POST'])
 def login_portal():
-    data = request.json
-    if not data or not data.get("username") or not data.get("password"):
+    """Khởi động tiến trình đăng nhập NỀN rồi trả về ngay; UI hỏi tiến độ qua /api/config/login/status.
+
+    Bản cũ giữ request HTTP mở trong lúc chờ cổng trường, nên khi cổng trường nghẽn
+    thì trình duyệt/proxy bỏ cuộc trước và báo "Không thể kết nối đến server SmartEnroll".
+    """
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    if not username or not password:
         return jsonify({"success": False, "message": "Thiếu tài khoản hoặc mật khẩu!"}), 400
-    
-    username = data.get("username").strip()
-    password = data.get("password").strip()
-    
-    if state.login_with_credentials(username, password):
-        return jsonify({"success": True, "message": "Đăng nhập thành công!", "config": state.config})
-    else:
-        err_msg = state.last_login_error or "Sai tài khoản hoặc mật khẩu, hoặc hệ thống trường lỗi!"
-        return jsonify({"success": False, "message": err_msg}), 401
+
+    persistent = bool(data.get("persistent", True))
+    ok, info = state.start_login_job(username, password, persistent=persistent)
+    if not ok:
+        return jsonify({"success": False, "message": info}), 409
+    return jsonify({"success": True, "started": True, "message": "Đang đăng nhập cổng trường..."}), 202
+
+@app.route('/api/config/login/status', methods=['GET'])
+def login_portal_status():
+    job = dict(state.login_job)
+    now = time.time()
+    next_retry_at = job.pop("next_retry_at", None)
+    job["retry_in"] = max(0.0, next_retry_at - now) if next_retry_at else None
+    if job.get("started_at"):
+        job["elapsed"] = (job.get("finished_at") or now) - job["started_at"]
+    if job.get("status") == "success":
+        job["config"] = state.config
+    return jsonify(job)
+
+@app.route('/api/config/login/stop', methods=['POST'])
+def login_portal_stop():
+    state.stop_login_job()
+    return jsonify({"success": True, "message": "Đã dừng đăng nhập."})
 
 @app.route('/api/config/logout', methods=['POST'])
 def logout_portal():
     try:
-        if os.path.exists(CONFIG_FILE):
-            os.remove(CONFIG_FILE)
+        state.stop_login_job()
+        state.is_spamming = False
+        if os.path.exists(state.config_file):
+            os.remove(state.config_file)
         state.config = None
         state.session.cookies.clear()
-        state.session.headers.clear()
+        state.session.headers.pop("Authorization", None)
+        state.session.headers.pop("Cookie", None)
         return jsonify({"success": True, "message": "Đăng xuất thành công!"})
     except Exception as e:
         return jsonify({"success": False, "message": f"Không thể đăng xuất: {e}"}), 500
@@ -362,11 +407,17 @@ def get_classes():
         
         classes = resp.json().get('data') or resp.json().get('body') or []
         filtered_classes = []
-        
-        for cls in classes:
+
+        # Tải lịch từng lớp song song (giới hạn 6 luồng): khi cổng trường chậm,
+        # quét tuần tự 20 lớp có thể mất vài phút.
+        import concurrent.futures
+        def load_detail(cls):
+            return cls, state.fetch_class_detail(cls.get('id'), is_conditional)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, max(1, len(classes)))) as executor:
+            detailed = list(executor.map(load_detail, classes))
+
+        for cls, details in detailed:
             cls_id = cls.get('id')
-            details = state.fetch_class_detail(cls_id, is_conditional)
-            
             if state.check_filter(details, target_thu, target_ca):
                 schedule = state.format_schedule(details)
                 percent = cls.get('phanTramDangKy', 0.0)
@@ -390,8 +441,7 @@ def get_classes():
                     "is_conflicting": is_conflicting,
                     "conflict_with": conflict_with
                 })
-                time.sleep(0.05) # Tiny sleep to prevent school server spam during query
-                
+
         return jsonify({"success": True, "data": filtered_classes})
     except Exception as e:
         return jsonify({"success": False, "message": f"Lỗi truy quét lớp: {e}"}), 500
@@ -647,9 +697,32 @@ def export_study_data():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
+def keep_machine_awake():
+    """Không cho máy tự ngủ khi đang treo chờ giờ đăng ký (máy ngủ = mất mạng = không đăng ký được).
+
+    Chỉ có hiệu lực khi server còn chạy; tắt server là máy ngủ bình thường lại.
+    Không chặn được việc gập màn hình laptop.
+    """
+    import platform
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            import subprocess
+            # -i: chặn ngủ khi rảnh, -w: tự thôi khi tiến trình này kết thúc
+            subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
+            state.log("☕ Đã bật chống ngủ máy trong lúc server chạy.")
+        elif system == "Windows":
+            import ctypes
+            ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+            state.log("☕ Đã bật chống ngủ máy trong lúc server chạy.")
+    except Exception as e:
+        state.log(f"⚠️ Không bật được chống ngủ máy: {e}. Hãy tự tắt chế độ ngủ khi treo máy chờ đăng ký.")
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5001))
     state.log(f"🔥 API Server đang chạy tại http://localhost:{port}")
+    keep_machine_awake()
     
     # Tự động mở trình duyệt sau khi Flask khởi động
     import webbrowser
