@@ -53,6 +53,13 @@ TURBO_LANES_PER_CLASS = 3
 SPAM_MAX_WORKERS = int(os.environ.get("SMARTENROLL_SPAM_WORKERS", "256"))
 KEEPALIVE_TICK = 30
 
+# Cổng trường trả lỗi nhanh (503/502/mất kết nối): thử lại sau tối đa bấy nhiêu giây (có jitter).
+# Đo bằng tests/login_chance.py: giãn tới 4-5 giây khiến tool lỡ đúng những giây đầu lúc mở đăng ký,
+# trong khi chỗ của lớp hot hết trong vài giây. Giữ quanh 1 request/giây/làn, ngang người bấm tay.
+LOGIN_RETRY_CAP = 2.0
+OVERLOAD_RETRY_CAP = 1.2
+OVERLOAD_RETRY_CAP_TURBO = 0.6
+
 # Token cổng trường là JWT sống 30 ngày -> chỉ gia hạn khi còn dưới 1 giờ.
 TOKEN_REFRESH_MARGIN = 3600
 # Token không đọc được hạn: giữ nhịp gia hạn 10 phút như bản cũ.
@@ -384,7 +391,8 @@ class _SpamLane:
             # Server trả lỗi nhanh (502/503/429...): lùi dần để không bị chặn IP.
             self.fail_streak += 1
             state._log_deduped(run.run_id, target_id, f"🔥 {name}: {msg}")
-            delay = retry_after or _backoff(self.fail_streak, base=0.4, cap=2.0 if run.turbo else 4.0)
+            delay = retry_after or _backoff(self.fail_streak, base=0.3,
+                                            cap=OVERLOAD_RETRY_CAP_TURBO if run.turbo else OVERLOAD_RETRY_CAP)
         return self.schedule(delay)
 
 
@@ -770,7 +778,7 @@ class AppState:
             if result.timed_out:
                 delay = random.uniform(0.2, 1.0)  # đã chờ đủ lâu trong timeout rồi, thử lại ngay
             else:
-                delay = result.retry_after or _backoff(attempt - 1)
+                delay = result.retry_after or _backoff(attempt - 1, cap=LOGIN_RETRY_CAP)
             self.log(f"⏳ Đăng nhập lần {attempt} chưa được: {result.message}. Thử lại sau {delay:.1f}s...")
             if progress:
                 progress(attempt, result.message, delay)

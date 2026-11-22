@@ -3,6 +3,8 @@
 
 Mô phỏng giờ cao điểm:
   - chỉ xử lý được `--workers` request cùng lúc; tối đa `--max-queue` request đứng chờ, quá thì trả 503 ngay
+  - request chờ quá `--gateway-timeout` giây thì trả 504 (giống nginx đứng trước một backend quá tải)
+  - client bỏ đi giữa chừng thì request vẫn nằm trong hàng và vẫn được xử lý (server không biết), như thật
   - hàng chờ kết nối TCP (`--backlog`) có hạn, nên khi bị dồn dập client gặp ConnectTimeout như thật
   - ngẫu nhiên ngắt kết nối giữa chừng, trả 502 dạng trang HTML, hủy token đang dùng (bắt đăng nhập lại)
   - lớp học có số chỗ giới hạn; trước giờ mở đăng ký thì trả lời "chưa đến thời gian"
@@ -36,7 +38,7 @@ class Portal:
         self.args = args
         self.rng = random.Random(args.seed)
         self.started = time.time()
-        self.open_at = self.started + args.open_after
+        self.open_at = args.open_at if args.open_at else self.started + args.open_after
         self.sem = asyncio.Semaphore(args.workers)
         self.waiting = 0
         self.processing = 0
@@ -47,14 +49,18 @@ class Portal:
         self.seats = {cid: args.seats for cid in range(1, args.classes + 1)}
         self.registered = {}                  # (username, class id) -> seconds after opening
         self.full_at = None
+        self.class_order = collections.defaultdict(list)  # class id -> users in the order they got a seat
         self.counts = collections.Counter()   # "endpoint:outcome" -> n
         self.login_attempts = collections.Counter()
+        self.first_login_at = {}              # username -> seconds after opening (negative = before)
         self.revoked = 0
 
     # ------------------------------------------------------------------ helpers
     def service_time(self, endpoint):
-        base = {"login": (0.25, 0.25), "dangKyLopHocPhan": (0.04, 0.08), "getDot": (0.02, 0.03)}
-        low, spread = base.get(endpoint, (0.02, 0.03))
+        a = self.args
+        base = {"login": a.login_service, "dangKyLopHocPhan": a.register_service,
+                "getDot": a.page_service, "getHocPhanHocMoi": a.page_service}
+        low, spread = base.get(endpoint, a.page_service)
         return low + self.rng.random() * spread
 
     def new_token(self, username):
@@ -88,21 +94,24 @@ class Portal:
 
         self.waiting += 1
         self.max_waiting = max(self.max_waiting, self.waiting)
-        queued = True
         try:
-            async with self.sem:
-                self.waiting -= 1
-                queued = False
-                self.processing += 1
-                self.max_processing = max(self.max_processing, self.processing)
-                try:
-                    await asyncio.sleep(self.service_time(endpoint))
-                    return await handler(request)
-                finally:
-                    self.processing -= 1
+            await asyncio.wait_for(self.sem.acquire(), timeout=self.args.gateway_timeout)
+        except asyncio.TimeoutError:
+            self.waiting -= 1
+            self.counts[f"{endpoint}:504"] += 1
+            return web.Response(status=504, text="<html>504 Gateway Time-out</html>", content_type="text/html")
+        except BaseException:
+            self.waiting -= 1
+            raise
+        self.waiting -= 1
+        self.processing += 1
+        self.max_processing = max(self.max_processing, self.processing)
+        try:
+            await asyncio.sleep(self.service_time(endpoint))
+            return await handler(request)
         finally:
-            if queued:  # client gave up while waiting in line
-                self.waiting -= 1
+            self.processing -= 1
+            self.sem.release()
 
     # ------------------------------------------------------------------ endpoints
     async def login(self, request):
@@ -112,9 +121,10 @@ class Portal:
             body = {}
         username, password = body.get("username", ""), body.get("password", "")
         self.login_attempts[username] += 1
-        valid = username.startswith("SV") and username[2:].isdigit() and 1 <= int(username[2:]) <= self.args.accounts
+        valid = username.startswith("SV") and username[2:].isdigit() and 1 <= int(username[2:]) <= self.args.accounts + self.args.extra_accounts
         if valid and password == f"pw-{username}":
             self.counts["login:ok"] += 1
+            self.first_login_at.setdefault(username, round(time.time() - self.open_at, 3))
             response = web.json_response({"success": True, "token": self.new_token(username)})
             response.set_cookie("ASP.NET_SessionId", f"s{self.token_seq}")
             return response
@@ -127,6 +137,14 @@ class Portal:
             return web.json_response({"message": "Unauthorized"}, status=401)
         self.counts["getDot:ok"] += 1
         return web.json_response({"data": [{"id": 77, "tenHocKy": "HK2 2026-2027"}]})
+
+    async def courses(self, request):
+        """Trang danh sách môn: sinh viên tải khi vào trang đăng ký và khi bấm F5."""
+        if not self.user_of(request):
+            self.counts["getHocPhanHocMoi:401"] += 1
+            return web.json_response({"message": "Unauthorized"}, status=401)
+        self.counts["getHocPhanHocMoi:ok"] += 1
+        return web.json_response({"data": [{"maHocPhan": f"HP{c:02d}"} for c in range(1, 3)]})
 
     async def register(self, request):
         user = self.user_of(request)
@@ -158,6 +176,7 @@ class Portal:
             return web.json_response({"success": False, "message": "Lớp học phần đã đủ số lượng sinh viên"})
         self.seats[class_id] -= 1
         self.registered[(user, class_id)] = round(now - self.open_at, 3)
+        self.class_order[class_id].append(user)
         if self.full_at is None and all(left == 0 for left in self.seats.values()):
             self.full_at = now
         self.counts["dangKyLopHocPhan:ok"] += 1
@@ -183,9 +202,10 @@ class Portal:
         if request.query.get("detail"):
             per_user = collections.defaultdict(list)
             for (user, class_id), at in self.registered.items():
-                per_user[user].append({"class": class_id, "at": at})
+                per_user[user].append({"class": class_id, "at": at, "rank": self.class_order[class_id].index(user) + 1})
             data["per_user"] = per_user
             data["login_attempts"] = dict(self.login_attempts)
+            data["first_login_at"] = self.first_login_at
         return web.json_response(data)
 
 
@@ -196,11 +216,12 @@ async def main(args):
     app.router.add_post("/api/v1/user/login", portal.login)
     app.router.add_get("/api/v1/dkhp/getDot", portal.get_dot)
     app.router.add_post("/api/v1/dkhp/dangKyLopHocPhan", portal.register)
+    app.router.add_get("/api/v1/dkhp/getHocPhanHocMoi", portal.courses)
     app.router.add_get("/__stats", portal.stats)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", args.port, backlog=args.backlog).start()
-    print(f"fake portal on :{args.port} | workers={args.workers} queue={args.max_queue} backlog={args.backlog} "
+    print(f"fake portal on :{args.port} | workers={args.workers} queue={args.max_queue} gateway={args.gateway_timeout}s backlog={args.backlog} "
           f"| {args.classes} classes x {args.seats} seats | opens in {args.open_after}s", flush=True)
     await asyncio.Event().wait()
 
@@ -210,6 +231,13 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=5099)
     parser.add_argument("--accounts", type=int, default=1000)
     parser.add_argument("--open-after", type=float, default=45)
+    parser.add_argument("--open-at", type=float, default=0, help="absolute epoch time registration opens (overrides --open-after)")
+    parser.add_argument("--extra-accounts", type=int, default=10, help="valid accounts beyond --accounts (for observers)")
+    parser.add_argument("--gateway-timeout", type=float, default=60, help="seconds a request may wait in line before 504")
+    parser.add_argument("--login-service", type=lambda v: tuple(map(float, v.split(","))), default=(0.25, 0.25),
+                        help="login processing time: min,spread seconds")
+    parser.add_argument("--register-service", type=lambda v: tuple(map(float, v.split(","))), default=(0.04, 0.08))
+    parser.add_argument("--page-service", type=lambda v: tuple(map(float, v.split(","))), default=(0.02, 0.03))
     parser.add_argument("--workers", type=int, default=60, help="requests processed at the same time")
     parser.add_argument("--max-queue", type=int, default=600, help="waiting requests before answering 503")
     parser.add_argument("--backlog", type=int, default=128, help="TCP accept queue")

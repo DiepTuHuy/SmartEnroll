@@ -35,3 +35,26 @@ Kết quả nằm trong `tests/output/`:
 - `loadtest_timeline.csv`: số luồng, RAM, CPU, hàng đợi của cổng giả theo từng giây
 
 Tùy chọn hữu ích: `--turbo-share 1.0` (mọi người cùng bật Turbo), `--workers 30 --max-queue 300` (cổng trường yếu hơn), `--accounts 50 --open-after 12 --run-after-open 10` (chạy thử nhanh).
+
+## Xác suất vào được khi 1000 sinh viên khác đang chen (khoảng 15 phút)
+
+```bash
+venv/bin/python tests/login_chance.py --trials 20
+```
+
+Đây là bài trả lời câu hỏi chính: **1000 sinh viên khác (dùng trình duyệt, không dùng tool) đang chen vào cổng trường; tài khoản của tôi dùng SmartEnroll đăng nhập giữa lúc đông nhất thì có vào được không, và giành được lớp khó nhất với xác suất bao nhiêu %?**
+
+Mỗi lần thử:
+- cổng trường giả **yếu**: chỉ xử lý 20 request cùng lúc, đăng nhập mất 0,5–1,5 giây mỗi lần
+- 1000 sinh viên (`crowd.py`) ồ ạt đăng nhập trong 20 giây đầu, chờ lâu thì bấm lại, F5 trang môn học, tới giờ thì bấm đăng ký liên tục, lớp đầy thì một nửa đổi lớp
+- ở giây thứ 8, giữa lúc đông nhất, **4 tài khoản cùng bắt đầu và cùng nhắm 2 lớp bị tranh nhiều nhất** (khoảng 230 người giành 30 chỗ):
+  - `tool-normal`, `tool-turbo`: SmartEnroll bản mới, chạy **đúng code `core_state.py`** (`my_tool.py`)
+  - `human`: một sinh viên bình thường
+  - `oldtool`: SmartEnroll bản cũ, mô phỏng theo đúng các timeout của bản cũ
+- mở đăng ký ở giây thứ 40, kết thúc ở giây thứ 100
+
+Hai kiểu cổng trường quá tải:
+- `A_tu_choi_nhanh`: hàng chờ đầy là trả 503 ngay
+- `B_xep_hang_lau`: bắt xếp hàng, chờ quá 60 giây thì 504 (giống lỗi timeout thật)
+
+Hành vi của người thật là giả định (xem đầu file `crowd.py`); cổng giả cũng không phải cổng thật. Con số % chỉ đúng với cổng giả này, dùng để **so sánh** các cách vào, không phải lời hứa cho cổng trường thật.
