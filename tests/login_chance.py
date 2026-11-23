@@ -3,7 +3,7 @@
 giữa lúc đông nhất thì có vào được không, và giành được lớp khó nhất với xác suất bao nhiêu %?
 
 Mỗi lần thử (trial):
-  - cổng trường giả YẾU (mặc định 20 request xử lý cùng lúc, đăng nhập mất 0.5-1.5 giây/lần)
+  - cổng trường giả YẾU (mặc định 8 request xử lý cùng lúc; thời gian xử lý theo số đo thật lúc vắng)
   - 1000 sinh viên 'người thật' (tests/crowd.py) ồ ạt đăng nhập trong 20 giây đầu, F5, rồi bấm đăng ký
   - ở giây thứ 8 (giữa lúc đông nhất), 4 tài khoản cùng bắt đầu và cùng nhắm 2 lớp bị tranh nhiều nhất:
         tool-normal : SmartEnroll bản mới, chế độ Thường   (code thật, tests/my_tool.py)
@@ -11,6 +11,10 @@ Mỗi lần thử (trial):
         human       : một sinh viên bình thường dùng trình duyệt
         oldtool     : SmartEnroll bản cũ (mô phỏng theo đúng các timeout của bản cũ)
   - mở đăng ký ở giây thứ 40, kết thúc ở giây thứ 100
+
+Cổng giả làm theo những gì đã quan sát trên cổng thật (xem đầu tests/fake_portal_server.py): vỏ JSON thật,
+mỗi tài khoản chỉ 1 phiên (đăng nhập mới đá token cũ), request nginx đã bỏ (504) vẫn được backend xử lý,
+và đám đông dùng trang y như trang thật (getDot, getLHPDaDangKy, getHocPhanHocMoi, danh sách lớp, chi tiết lớp...).
 
 Hai kiểu cổng trường quá tải:
   A_tu_choi_nhanh : hàng chờ đầy (300) là trả 503 ngay
@@ -34,9 +38,11 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "output"
 PY = sys.executable
 
+# workers=8: chỉnh sao cho mức nghẽn giống đợt đăng ký thật (bản cũ ConnectTimeout, không vào được);
+# năng lực thật của cổng thì không đo được lúc vắng.
 PROFILES = {
-    "A_tu_choi_nhanh": {"workers": 20, "max_queue": 300, "gateway_timeout": 60},
-    "B_xep_hang_lau": {"workers": 20, "max_queue": 100000, "gateway_timeout": 60},
+    "A_tu_choi_nhanh": {"workers": 8, "max_queue": 300, "gateway_timeout": 60},
+    "B_xep_hang_lau": {"workers": 8, "max_queue": 100000, "gateway_timeout": 60},
 }
 PARTICIPANTS = ["tool-normal", "tool-turbo", "human", "oldtool"]
 
@@ -47,7 +53,9 @@ def stats_of(port, detail=True):
 
 
 def run_trial(profile_name, trial, port, a):
-    prof = PROFILES[profile_name]
+    prof = dict(PROFILES[profile_name])
+    if a.workers:
+        prof["workers"] = a.workers
     work = Path(tempfile.mkdtemp(prefix=f"chance-{profile_name}-{trial}-"))
     t0 = time.time() + 4                       # give every process time to boot
     open_at = t0 + a.open_after
@@ -61,7 +69,7 @@ def run_trial(profile_name, trial, port, a):
         [PY, str(HERE / "fake_portal_server.py"), "--port", str(port), "--accounts", str(n), "--extra-accounts", "10",
          "--open-at", str(open_at), "--workers", str(prof["workers"]), "--max-queue", str(prof["max_queue"]),
          "--gateway-timeout", str(prof["gateway_timeout"]), "--login-service", a.login_service,
-         "--register-service", a.register_service, "--page-service", a.page_service,
+         "--register-service", a.register_service, "--page-service", a.page_service, "--list-service", a.list_service,
          "--classes", "30", "--seats", "30", "--seed", str(seed)],
         stdout=open(work / "portal.log", "w"), stderr=subprocess.STDOUT)
     procs = []
@@ -106,7 +114,9 @@ def run_trial(profile_name, trial, port, a):
     targets = [int(x) for x in a.targets.split(",")]
     per_user = final.get("per_user", {})
     started_rel = round(me_start - open_at, 3)
+    kicked, zombies = final.get("kicked", {}), final.get("zombie_logins", {})
     result = {"profile": profile_name, "trial": trial, "crowd_logged_in_before_open": crowd.get("crowd_logged_in_before_open"),
+              "portal": {k: final.get(k) for k in ("kicked_total", "zombie_logins_total", "max_waiting", "requests_total")},
               "demand": {str(c): crowd.get("demand", {}).get(str(c)) for c in targets}, "participants": {}}
     for kind in PARTICIPANTS:
         user = users[kind]
@@ -122,6 +132,8 @@ def run_trial(profile_name, trial, port, a):
             "login_attempts": info.get("login_attempts"),
             "classes": {str(c): ({"at": regs[c]["at"], "rank": regs[c]["rank"]} if c in regs else None) for c in targets},
             "note": info.get("stopped"),
+            "kicked": kicked.get(user, 0),
+            "zombie_logins": zombies.get(user, 0),
         }
     (work / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1))
     return result
@@ -145,7 +157,10 @@ def summarize(results, a):
         lines.append(f"\n=== {profile}  ({n} lần thử, {a.students} sinh viên khác, "
                      f"trung bình {round(statistics.mean(crowd_in)) if crowd_in else '?'}/{a.students} người vào được trước giờ mở)")
         lines.append(f"    lớp nhắm tới: " + ", ".join(f"lớp {c}: ~{round(demand[c])} người giành 30 chỗ" for c in targets))
-        header = f"    {'':12} {'vào trước giờ mở':>20} {'vào được (cả đợt)':>20} {'thời gian vào (trung vị)':>26}" + "".join(f" {'giành được lớp ' + c:>20}" for c in targets)
+        portal = [r.get("portal") or {} for r in rs]
+        lines.append(f"    cổng: trung bình {statistics.mean([q.get('kicked_total') or 0 for q in portal]):.0f} lần đăng nhập đá phiên cũ, "
+                     f"{statistics.mean([q.get('zombie_logins_total') or 0 for q in portal]):.0f} lần đăng nhập 'ma' (không ai nhận token)")
+        header = f"    {'':12} {'vào trước giờ mở':>20} {'vào được (cả đợt)':>20} {'thời gian vào (trung vị)':>26}" + "".join(f" {'giành được lớp ' + c:>20}" for c in targets) + f" {'bị đá ra (tb/lần)':>18}"
         lines.append(header)
         report[profile] = {}
         for kind in PARTICIPANTS:
@@ -155,10 +170,12 @@ def summarize(results, a):
             waits = [p["login_wait_s"] for p in ps if p["login_wait_s"] is not None]
             got = {c: sum(1 for p in ps if p["classes"].get(c)) for c in targets}
             med = f"{statistics.median(waits):.1f}s" if waits else "-"
-            lines.append(f"    {kind:12} {pct(before, n):>20} {pct(ever, n):>20} {med:>26}" + "".join(f" {pct(got[c], n):>20}" for c in targets))
+            kicked = statistics.mean([p.get("kicked", 0) for p in ps])
+            lines.append(f"    {kind:12} {pct(before, n):>20} {pct(ever, n):>20} {med:>26}" + "".join(f" {pct(got[c], n):>20}" for c in targets)
+                         + f" {kicked:>18.2f}")
             report[profile][kind] = {"login_before_open": before, "login_ever": ever, "trials": n,
                                      "login_wait_median_s": statistics.median(waits) if waits else None,
-                                     "got_class": got}
+                                     "got_class": got, "kicked_mean": kicked}
     return "\n".join(lines), report
 
 
@@ -173,9 +190,13 @@ def main():
     ap.add_argument("--open-after", type=float, default=40)
     ap.add_argument("--run-after-open", type=float, default=60)
     ap.add_argument("--targets", default="1,16", help="the two most contested classes")
-    ap.add_argument("--login-service", default="0.5,1.0")
+    # thời gian xử lý mỗi request (min,spread giây). Lúc vắng đo được trên cổng thật: đăng nhập ~0.27s,
+    # các trang 0.15-0.35s, danh sách lớp ~0.45s. Đăng ký: không đo được (giả định).
+    ap.add_argument("--login-service", default="0.2,0.15")
     ap.add_argument("--register-service", default="0.1,0.2")
-    ap.add_argument("--page-service", default="0.05,0.1")
+    ap.add_argument("--page-service", default="0.1,0.25")
+    ap.add_argument("--list-service", default="0.35,0.2")
+    ap.add_argument("--workers", type=int, default=0, help="override the profile's worker count")
     ap.add_argument("--base-port", type=int, default=5200)
     a = ap.parse_args()
     OUT.mkdir(exist_ok=True)

@@ -57,4 +57,17 @@ st2 = core_state.AppState("h2")
 st2._heartbeat()
 check(st2.token_ok is False and PORTAL.calls.get("login", 0) == 0, "no credentials: token marked bad, no login spam")
 
+# 6. single session: the portal keeps 1 session per account, so a dead token usually means "logged in elsewhere";
+#    killed again and again = two places fighting over the account -> one loud warning, not one per kick
+write_cfg("h3", jwt(30 * 86400, "x"))
+PORTAL.script("getDot", "unauth")
+PORTAL.script("login", "ok")
+st3 = core_state.AppState("h3")
+wait_quiet()
+for _ in range(4):
+    st3._heartbeat()
+wait_quiet()
+check(any("nơi khác" in l for l in st3.logs), "dead token explained: probably logged in elsewhere")
+check(sum("🚨" in l for l in st3.logs) == 1, "killed 3+ times in 15 min: exactly one 'two places fighting' warning")
+
 finish()

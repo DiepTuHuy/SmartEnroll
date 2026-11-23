@@ -4,9 +4,12 @@
 Mô hình hành vi (là GIẢ ĐỊNH, chỉnh được bên dưới):
   - vào đăng nhập rải rác trong `--arrival-window` giây đầu
   - bấm đăng nhập; trang quay quá 15-40 giây thì bấm lại; lỗi/503 thì 2-6 giây sau bấm lại; không bỏ cuộc
-  - vào được thì mở trang đăng ký (tải danh sách môn), trong lúc chờ giờ mở thì F5 mỗi 8-20 giây
-  - tới giờ: bấm "Đăng ký" lớp mình muốn, 1-3 giây bấm một lần, mỗi lần chờ tối đa 15-30 giây
-  - lớp đầy: một nửa đổi sang lớp khác cùng môn, một nửa cứ bấm tiếp; bị đá ra (401) thì đăng nhập lại
+  - vào được thì mở trang đăng ký đúng như trang thật gọi: getDot, rồi getLHPDaDangKy + getHocPhanHocMoi;
+    trong lúc chờ giờ mở thì F5 mỗi 8-20 giây (tải lại cả 3)
+  - tới giờ: chọn môn (getLopHocPhanChoDangKy, request nặng nhất), bấm vào lớp (getLopHocPhanDetail),
+    rồi bấm ĐĂNG KÝ 1-3 giây một lần; mỗi request chờ tối đa 15-40 giây rồi bỏ (request đó vẫn nằm ở cổng)
+  - lớp đầy: một nửa quay lại danh sách đổi sang lớp khác cùng môn, một nửa cứ bấm tiếp
+  - bị đá ra (401, vd. do một lần đăng nhập cũ của chính mình tới sau) thì đăng nhập lại
 
 Ngoài đám đông còn 2 'người quan sát' vào cùng lúc với tài khoản dùng tool mới và nhắm cùng 2 lớp:
   - human : một sinh viên bình thường y như đám đông nhưng không đổi lớp
@@ -69,31 +72,66 @@ class Crowd:
         return None
 
     # ------------------------------------------------------------------ a normal student in a browser
+    async def open_registration_page(self, token, patience):
+        """What the real page loads (seen in the browser): getDot, then on choosing the semester
+        getLHPDaDangKy + getHocPhanHocMoi in parallel. Returns False if the token was rejected."""
+        status, _ = await self.call("GET", "/api/v1/dkhp/getDot", patience, token)
+        if status == 401:
+            return False
+        results = await asyncio.gather(
+            self.call("GET", "/api/v1/dkhp/getLHPDaDangKy?idDot=77", patience, token),
+            self.call("GET", "/api/v1/dkhp/getHocPhanHocMoi?idDot=77", patience, token))
+        return all(s != 401 for s, _ in results)
+
     async def human(self, user, arrive_at, wanted, may_switch, rng):
-        res = self.results[user] = {"kind": "human", "login_at": None, "login_attempts": 0}
+        res = self.results[user] = {"kind": "human", "login_at": None, "login_attempts": 0, "kicked_out": 0}
         await self.sleep_until(arrive_at)
         token = None
         current = list(wanted)  # one class per subject
         done = [False] * len(current)
+
+        def patience():
+            return aiohttp.ClientTimeout(total=rng.uniform(15, 40))
+
         while time.time() < self.a.end_at and not all(done):
             while token is None and time.time() < self.a.end_at:
                 res["login_attempts"] += 1
-                token = await self.login(user, aiohttp.ClientTimeout(total=rng.uniform(15, 40)))
+                token = await self.login(user, patience())
                 if token is None:
                     await asyncio.sleep(rng.uniform(2, 6))
                 elif res["login_at"] is None:
                     res["login_at"] = self.rel()
             if token is None:
                 break
-            await self.call("GET", "/api/v1/dkhp/getHocPhanHocMoi?idDot=77", aiohttp.ClientTimeout(total=30), token)
-            while time.time() < self.a.open_at - 0.5:            # F5 while waiting for opening
+            ok = await self.open_registration_page(token, patience())
+            while ok and time.time() < self.a.open_at - 0.5:            # F5 while waiting for opening
                 await asyncio.sleep(min(rng.uniform(8, 20), max(0.1, self.a.open_at - time.time())))
                 if time.time() < self.a.open_at - 0.5:
-                    await self.call("GET", "/api/v1/dkhp/getHocPhanHocMoi?idDot=77", aiohttp.ClientTimeout(total=30), token)
+                    ok = await self.open_registration_page(token, patience())
+            if not ok:
+                token = None
+                res["kicked_out"] += 1
+                continue
             for idx in range(len(current)):
+                listed = False
                 while not done[idx] and token is not None and time.time() < self.a.end_at:
-                    status, data = await self.call("POST", f"/api/v1/dkhp/dangKyLopHocPhan?idLopHocPhan={current[idx]}",
-                                                   aiohttp.ClientTimeout(total=rng.uniform(15, 30)), token)
+                    if not listed:   # choose the subject -> class list (the heaviest request), then click the class
+                        ma = "0120000001" if current[idx] <= self.a.classes // 2 else "0120000002"
+                        status, _ = await self.call("GET", f"/api/v1/dkhp/getLopHocPhanChoDangKy?idDot=77&maHocPhan={ma}"
+                                                    "&isLocTrung=false&isLocTrungWithoutElearning=false", patience(), token)
+                        if status == 401:
+                            token = None
+                            break
+                        if status != 200:
+                            await asyncio.sleep(rng.uniform(1, 3))
+                            continue
+                        listed = True
+                        status, _ = await self.call("GET", f"/api/v1/dkhp/getLopHocPhanDetail?idLopHocPhan={current[idx]}", patience(), token)
+                        if status == 401:
+                            token = None
+                            break
+                    status, data = await self.call("POST", f"/api/v1/dkhp/dangKyLopHocPhan?idLopHocPhan={current[idx]}&g-recaptcha-response=x",
+                                                   patience(), token)
                     msg = (data or {}).get("message", "") if isinstance(data, dict) else ""
                     if status == 401:
                         token = None
@@ -104,11 +142,13 @@ class Crowd:
                     if "đủ số lượng" in msg and may_switch and rng.random() < 0.5:
                         lo, hi = self.subject_range(current[idx])
                         current[idx] = rng.choice([c for c in range(lo, hi + 1) if c != current[idx]])
+                        listed = False          # goes back to the list to pick the new class
                     if "Chưa đến" in msg:
                         await asyncio.sleep(rng.uniform(1, 2))
                     else:
                         await asyncio.sleep(rng.uniform(1, 3))
                 if token is None:
+                    res["kicked_out"] += 1
                     break
 
     def subject_range(self, class_id):
@@ -135,12 +175,12 @@ class Crowd:
         while left and time.time() < self.a.end_at:
             next_round = []
             for class_id in left:
-                status, data = await self.call("POST", f"/api/v1/dkhp/dangKyLopHocPhan?idLopHocPhan={class_id}", reg_timeout, token)
+                status, data = await self.call("POST", f"/api/v1/dkhp/dangKyLopHocPhan?idLopHocPhan={class_id}&g-recaptcha-response=", reg_timeout, token)
                 if status == 401:                                   # one re-login, else give up for good
                     res["login_attempts"] += 1
                     token = await self.login(user, login_timeout)
                     if token:
-                        status, data = await self.call("POST", f"/api/v1/dkhp/dangKyLopHocPhan?idLopHocPhan={class_id}", reg_timeout, token)
+                        status, data = await self.call("POST", f"/api/v1/dkhp/dangKyLopHocPhan?idLopHocPhan={class_id}&g-recaptcha-response=", reg_timeout, token)
                     if not token or status == 401:
                         res["stopped"] = "token hết hạn, bản cũ dừng spam"
                         return

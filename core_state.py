@@ -68,6 +68,10 @@ UNKNOWN_EXPIRY_REFRESH_INTERVAL = 600
 # Hạn 30 ngày chỉ là con số ghi trong token; server trường vẫn có thể hủy sớm hơn.
 # Nhịp này vừa giữ phiên không bị coi là "bỏ quên", vừa phát hiện token chết từ lúc cổng còn vắng.
 HEARTBEAT_INTERVAL = 240
+# Cổng trường chỉ giữ 1 phiên cho mỗi tài khoản (đã thấy tận mắt: đăng nhập trên trình duyệt làm token của tool chết,
+# tool đăng nhập lại thì trình duyệt bị đá ra). Token bị hủy nhiều lần trong ít phút = có nơi khác đang đăng nhập cùng lúc.
+KICK_ALERT_WINDOW = 900
+KICK_ALERT_COUNT = 3
 
 # Cùng một thông báo từ chối lặp lại quá nhiều lần -> dừng, tránh khóa tài khoản.
 MAX_IDENTICAL_LOGIN_REJECTIONS = 8
@@ -270,6 +274,7 @@ class _SpamRun:
         self.inflight = threading.Semaphore(MAX_INFLIGHT_REGISTER)
         self.lanes_left = 0
         self.aborted = False
+        self.kick_hint_shown = False
         self._lock = threading.Lock()
 
     def active(self):
@@ -452,6 +457,9 @@ class AppState:
         self._spam_relogin_lock = threading.Lock()
         self._spam_relogin_active = False
         self._keepalive_busy = False
+        self._kick_lock = threading.Lock()
+        self._kick_times = []
+        self._kick_alert_at = 0.0
 
         self._migrate_legacy_config()
         self.load_config_data()
@@ -638,10 +646,38 @@ class AppState:
         iat = _jwt_claims(token).get("iat")
         age = f" (token được cấp {((now - float(iat)) / 60):.0f} phút trước)" if isinstance(iat, (int, float)) else ""
         if self._saved_credentials():
-            self.log(f"⚠️ Cổng trường không còn chấp nhận token{age}. Đang đăng nhập lại ngay khi cổng còn vắng...")
+            self.log(f"⚠️ Cổng trường không còn chấp nhận token{age}. Thường là do tài khoản vừa được đăng nhập ở nơi khác "
+                     "(cổng trường chỉ giữ 1 phiên cho mỗi tài khoản). Đang đăng nhập lại ngay khi cổng còn vắng; "
+                     "phiên ở nơi kia sẽ bị đăng xuất.")
+            self._note_token_killed()
             self._recover_from_401(seen_gen, max_attempts=3)
         else:
-            self.log(f"⚠️ Cổng trường không còn chấp nhận token{age} và không có mật khẩu đã lưu. Vui lòng đăng nhập lại.")
+            self.log(f"⚠️ Cổng trường không còn chấp nhận token{age} và không có mật khẩu đã lưu "
+                     "(có thể do tài khoản vừa được đăng nhập ở nơi khác). Vui lòng đăng nhập lại.")
+            self._note_token_killed()
+
+    def _note_token_killed(self, run=None):
+        """Ghi nhận một lần token đang dùng bị cổng trường hủy giữa chừng.
+
+        Cổng trường chỉ giữ 1 phiên cho mỗi tài khoản, nên chuyện này thường là do có nơi khác vừa đăng nhập.
+        Bị hủy liên tục = hai nơi (vd. bản web và bot Discord, hoặc tool và điện thoại) đang đá nhau.
+        """
+        now = time.time()
+        with self._kick_lock:
+            self._kick_times = [t for t in self._kick_times if now - t < KICK_ALERT_WINDOW]
+            self._kick_times.append(now)
+            count = len(self._kick_times)
+            alert = count >= KICK_ALERT_COUNT and now - self._kick_alert_at >= KICK_ALERT_WINDOW
+            if alert:
+                self._kick_alert_at = now
+        if alert:
+            self.log(f"🚨 Token của tool bị cổng trường hủy {count} lần trong {KICK_ALERT_WINDOW // 60} phút. Có vẻ tài khoản này "
+                     "đang được đăng nhập ở nơi khác cùng lúc (bot Discord hoặc một bản SmartEnroll khác, điện thoại, trình duyệt). "
+                     "Cổng trường chỉ giữ 1 phiên nên hai bên sẽ đá nhau liên tục: hãy để duy nhất một nơi đăng nhập.")
+        elif run is not None and not run.kick_hint_shown:
+            run.kick_hint_shown = True
+            self.log("💡 Cổng trường chỉ giữ 1 phiên cho mỗi tài khoản: nếu bạn đang mở cổng trường bằng tài khoản này trên "
+                     "điện thoại/trình duyệt, hãy thoát ra. Mỗi lần đăng nhập ở đó là tool bị đá ra và phải đăng nhập lại.")
 
     def _safe_keepalive_tick(self):
         try:
@@ -1172,6 +1208,7 @@ class AppState:
                 self.last_login_error = "Không có mật khẩu đã lưu để tự đăng nhập lại."
                 return "no_credentials"
             self._spam_relogin_active = True
+        self._note_token_killed(run)
         threading.Thread(target=self._spam_relogin_worker, args=(seen_gen, run),
                          name=f"smartenroll-relogin-{self.user_id}", daemon=True).start()
         return "pending"

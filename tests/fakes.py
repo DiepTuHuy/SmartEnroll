@@ -149,7 +149,9 @@ class FakeAdapter(BaseAdapter):
                 b = "ok"
             if b == "unauth":
                 return make_response(request, 401, {"message": "Unauthorized"})
-            return make_response(request, 200, {"data": [{"id": 99}]})
+            # real portal envelope (seen in the browser): data sits in "body"
+            return make_response(request, 200, {"success": True, "status": 200, "message": None,
+                                                 "body": [{"id": 99}], "token": None, "timestamp": "2026-11-23T07:18:55.440+00:00"})
         if key == "getSomething":
             return make_response(request, 200, {"data": []})
         return make_response(request, 404, text="nf")

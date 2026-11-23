@@ -45,8 +45,8 @@ venv/bin/python tests/login_chance.py --trials 20
 Đây là bài trả lời câu hỏi chính: **1000 sinh viên khác (dùng trình duyệt, không dùng tool) đang chen vào cổng trường; tài khoản của tôi dùng SmartEnroll đăng nhập giữa lúc đông nhất thì có vào được không, và giành được lớp khó nhất với xác suất bao nhiêu %?**
 
 Mỗi lần thử:
-- cổng trường giả **yếu**: chỉ xử lý 20 request cùng lúc, đăng nhập mất 0,5–1,5 giây mỗi lần
-- 1000 sinh viên (`crowd.py`) ồ ạt đăng nhập trong 20 giây đầu, chờ lâu thì bấm lại, F5 trang môn học, tới giờ thì bấm đăng ký liên tục, lớp đầy thì một nửa đổi lớp
+- cổng trường giả **yếu**: chỉ xử lý 8 request cùng lúc (chỉnh để mức nghẽn giống đợt đăng ký thật); thời gian xử lý mỗi request lấy theo số đo trên cổng thật lúc vắng
+- 1000 sinh viên (`crowd.py`) ồ ạt đăng nhập trong 20 giây đầu, chờ lâu thì bấm lại, F5 trang đăng ký (gọi đúng các API trang thật gọi), tới giờ thì chọn môn → xem danh sách lớp → bấm vào lớp → bấm ĐĂNG KÝ liên tục, lớp đầy thì một nửa đổi lớp
 - ở giây thứ 8, giữa lúc đông nhất, **4 tài khoản cùng bắt đầu và cùng nhắm 2 lớp bị tranh nhiều nhất** (khoảng 230 người giành 30 chỗ):
   - `tool-normal`, `tool-turbo`: SmartEnroll bản mới, chạy **đúng code `core_state.py`** (`my_tool.py`)
   - `human`: một sinh viên bình thường
@@ -58,3 +58,21 @@ Hai kiểu cổng trường quá tải:
 - `B_xep_hang_lau`: bắt xếp hàng, chờ quá 60 giây thì 504 (giống lỗi timeout thật)
 
 Hành vi của người thật là giả định (xem đầu file `crowd.py`); cổng giả cũng không phải cổng thật. Con số % chỉ đúng với cổng giả này, dùng để **so sánh** các cách vào, không phải lời hứa cho cổng trường thật.
+
+## Cổng giả giống cổng thật tới đâu
+
+Đã vào xem cổng thật (11/2026) bằng trình duyệt, **chỉ xem, không đăng ký / hủy / gửi gì**, rồi làm lại trong `fake_portal_server.py`:
+
+| Quan sát trên cổng thật | Trong cổng giả |
+|---|---|
+| nginx đứng trước backend kiểu Spring, HTTP/2 | header `server: nginx`, `cache-control: no-store` |
+| mọi API trả `{success, status, message, body, token, timestamp}`; đăng nhập trả token ở trường `token` | y như vậy |
+| **mỗi tài khoản chỉ 1 phiên**: đăng nhập ở nơi khác thì token cũ bị 401 ngay | đăng nhập mới đá token cũ (`--multi-session` để tắt) |
+| đăng nhập và đăng ký gửi kèm `?g-recaptcha-response=` | nhận tham số này, không kiểm tra |
+| trang Đăng ký gọi `getDot` → `getLHPDaDangKy` + `getHocPhanHocMoi` → `getLopHocPhanChoDangKy` → `getLopHocPhanDetail` → `dangKyLopHocPhan` | đủ các API đó, đám đông gọi đúng trình tự đó |
+| danh sách lớp không có sĩ số, chỉ có `phanTramDangKy`, `choDangKy`, `isCanhBao`, `tenTrangThai` | y như vậy, % tính từ số chỗ còn |
+| lúc vắng: đăng nhập ~0,27 s, các trang 0,15–0,35 s, danh sách lớp ~0,45 s | dùng làm thời gian xử lý mỗi request |
+
+Phần **giả định** (không xem được nếu không đăng ký, hoặc phải đợi giờ cao điểm): năng lực của cổng (số request xử lý cùng lúc, độ dài hàng chờ, thời gian chờ của nginx); request bị nginx trả 504 vẫn được backend xử lý sau đó (`--no-zombies` để tắt). Một lần đăng nhập "ma" như vậy vẫn cấp token, nên nó đá phiên đang dùng. Ngoài ra còn nội dung lỗi 401 và các câu thông báo khi đăng ký.
+
+Hệ quả của "mỗi tài khoản 1 phiên": **trong giờ đăng ký đừng đăng nhập cùng tài khoản trên điện thoại / trình duyệt / bot khác**. Mỗi lần như vậy là tool bị đá ra và phải đăng nhập lại đúng lúc cổng nghẽn nhất. Nếu hai bản SmartEnroll (web và Discord) cùng chạy một tài khoản, chúng sẽ đá nhau liên tục.

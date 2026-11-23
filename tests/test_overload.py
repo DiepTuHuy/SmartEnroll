@@ -93,6 +93,7 @@ check(PORTAL.calls.get("login") == 3, f"exactly one relogin sequence for all lan
 check(st.stats.get("relogins", 0) >= 1, "relogin counted")
 check(any("ĐĂNG KÝ THÀNH CÔNG: Toán" in l for l in st.logs) and any("ĐĂNG KÝ THÀNH CÔNG: Lý" in l for l in st.logs), "success logged for both")
 check(PORTAL.calls.get("getDot", 0) == 0, "re-login during spam sends no extra period refresh (less load at peak time)")
+check(sum("chỉ giữ 1 phiên" in l for l in st.logs) == 1, "token killed mid-spam: one hint about logging in elsewhere (single session)")
 
 # ---------------------------------------------------------------- 8. stop during a never-ending campaign returns fast
 PORTAL.script("reg:3", "Chưa đến thời gian đăng ký")
